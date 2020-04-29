@@ -13,6 +13,9 @@ nix-env -i -f .
 
 ## Usage
 
+[See a quick demo on
+YouTube](https://www.youtube.com/watch?v=VUM3Km_4gUg&list=PLRGI9KQ3_HP_OFRG6R-p4iFgMSK1t5BHs)
+
 ```bash
 , cowsay neato
 ```
