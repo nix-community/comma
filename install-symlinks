@@ -1,0 +1,11 @@
+#!ruby --disable-gems
+
+require('fileutils')
+
+bin_dir = ARGV.first
+
+names = File.read("#{bin_dir}/,").scan(/\\1(,\S+) /).flatten - [',']
+
+names.each do |name|
+  FileUtils.ln_s("#{bin_dir}/,", "#{bin_dir}/#{name}")
+end

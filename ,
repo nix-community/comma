@@ -1,44 +1,158 @@
-#!/bin/bash
-#
-# usage example:
-#   $ , yarn --help
-# This finds a derivation providing a bin/yarn, and runs it with `nix run`.
-# If there are multiple candidates, the user chooses one using `fzy`.
-set -euo pipefail
+#!ruby --disable-gems
 
-if [[ $# -lt 1 ]]; then
-  >&2 echo "usage: , <program> [arguments]"
-  exit 1
-fi
+ENV['PATH'] = "@PATH_PREPEND@:" + ENV['PATH']
+$NIX_INDEX_DB = "@NIX_INDEX_DB@"
+$OVERLAY_PACKAGES = "@OVERLAY_PACKAGES@".split(':')
 
-if [[ "$1" == "--install" ]] || [[ "$1" == "-i" ]]; then
-  install=1
-  shift
-else
-  install=""
-fi
+module Comma
+  class << self
+    def store_paths(argv, stdin)
+      inputs = ARGV.empty? ? STDIN.readlines.map(&:chomp) : ARGV
+      inputs.map! { |i| i =~ /^[a-z0-9]{32}-/ ? "/nix/store/#{i}" : i }
+    end
 
-argv0=$1; shift
+    USAGE = <<~USAGE
+      \1,h \4or \1, -h         \3: \4(show this help)\6
 
-case "${argv0}" in
-  @OVERLAY_PACKAGES@)
-    attr="${argv0}"
-    ;;
-  *)
-    attr="$(nix-locate --db "${NIX_INDEX_DB}" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
-    if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
-      attr="$(echo "${attr}" | fzy)"
-    fi
-    ;;
-esac
+      \1,    \2<bin-name>    \3: \4(run a binary from whatever package it exists in)\6
+      \1,i   \2<bin-name>    \3: \5nix-env -i \4(whichever package the binary exists in)\6
 
-if [[ -z $attr ]]; then
-  >&2 echo "no match"
-  exit 1
-fi
+      \1,sl  \2<regex>       \3: \4(list nix-store entries matching regex)\6
+      \1,sx  \2<store-path*> \3: \5nix-store --realise\6
 
-if [[ -n $install ]]; then
-  nix-env -iA "nixpkgs.${attr%%.*}"
-else
-  nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
-fi
+      \1,qs  \2<store-path*> \3: \5nix show-derivation\6
+
+      \1,qo  \2<store-path*> \3: \5nix-store --query --outputs\6
+      \1,qd  \2<store-path*> \3: \5nix-store --query --deriver\6
+
+      \1,q-  \2<store-path*> \3: \5nix-store --query --references\6
+      \1,q-- \2<store-path*> \3: \5nix-store --query --requisites\6
+      \1,q+  \2<store-path*> \3: \5nix-store --query --referers\6
+      \1,q++ \2<store-path*> \3: \5nix-store --query --referers-closure\6
+
+      \4Anything taking \2<store-path*>\4 can also be called like:
+        \5echo \2<store-path*> \5| \1,q-
+    USAGE
+
+    COLORS = {
+      1.chr => "\x1b[0;1;34m",
+      2.chr => "\x1b[0;3;32m",
+      3.chr => "\x1b[0;37m",
+      4.chr => "\x1b[0;3;37m",
+      5.chr => "\x1b[0;35m",
+      6.chr => "\x1b[0m"
+    }
+
+    def usage(stream, color: stream.tty?)
+      if color
+        stream.puts(COLORS.reduce(USAGE) { |usage, (a, b)| usage.gsub(a, b) })
+      else
+        stream.puts(COLORS.reduce(USAGE) { |usage, (a, _)| usage.gsub(a, '') })
+      end
+    end
+
+    def call(argv, stdin, stderr, execname)
+      case execname
+
+      when ',h'
+        usage(stderr)
+        exit(0)
+
+      when ','
+        if argv.empty? || argv.first == '-h' || argv.first == '--help'
+          usage(stderr)
+          exit(0)
+        else
+          comma(argv)
+        end
+
+      when ',i'
+        comma_i(argv)
+
+      when ',q'
+        usage(stderr)
+        exit(0)
+
+      when ',ql'
+        q_list(Regexp.new(argv.first || ''))
+      when ',qs'
+        exec('nix', 'show-derivation', *store_paths(argv, stdin))
+
+      when ',qo'
+        exec('nix-store', '--query', '--outputs', *store_paths(argv, stdin))
+      when ',qd'
+        exec('nix-store', '--query', '--deriver', *store_paths(argv, stdin))
+
+      when ',q-'
+        exec('nix-store', '--query', '--references', *store_paths(argv, stdin))
+      when ',q--'
+        exec('nix-store', '--query', '--requisites', *store_paths(argv, stdin))
+      when ',q+'
+        exec('nix-store', '--query', '--referers', *store_paths(argv, stdin))
+      when ',q++'
+        exec('nix-store', '--query', '--referers-closure', *store_paths(argv, stdin))
+
+      when ',qx'
+        exec('nix-store', '--realise', *store_paths(argv, stdin))
+
+      else
+        abort('invalid invocation')
+      end
+    end
+
+    def q_list(pattern)
+      Dir.entries('/nix/store').each do |entry|
+        next if entry[0] == '.'
+        puts(entry) if pattern.match?(entry)
+      end
+    end
+
+    def comma(argv)
+      match = comma_match(argv.first)
+      exec('nix', 'run', "nixpkgs.#{match}", '-c', *argv)
+      #   nix-env -iA "nixpkgs.${attr%%.*}"
+    end
+
+    def comma_i(argv)
+      match = comma_match(argv.first)
+      exec('nix-env', '-iA', "nixpkgs.#{match}")
+    end
+
+    def comma_match(str)
+      return str if $OVERLAY_PACKAGES.include?(str)
+      require('open3')
+      out, err, stat = Open3.capture3(
+        'nix-locate',
+        '--db', $NIX_INDEX_DB,
+        '--top-level',
+        '--minimal',
+        '--at-root',
+        '--whole-name',
+        "/bin/#{str}",
+      )
+      abort("no match: #{err}") unless stat.success?
+      matches = out.lines.map { |m| m.chomp.sub(/\.out$/, '') }
+      match = if matches.size > 1
+        height = matches.size + 1
+        out, stat = Open3.capture2(
+          'fzf',
+          '--height', height.to_s,
+          '--layout', 'reverse',
+          '--info', 'hidden',
+          '--preview', "nix eval --raw '(import <nixpkgs> { }).{}.meta.description'",
+          '--preview-window=right:99%:wrap',
+          stdin_data: matches.join("\n"),
+        )
+        abort("fzf failed") unless stat.success?
+        out.chomp
+      else
+        matches[0]
+      end
+      abort("no matches") if match.nil?
+      match
+    end
+
+  end
+end
+
+Comma.call(ARGV, STDIN, STDERR, File.basename($PROGRAM_NAME))

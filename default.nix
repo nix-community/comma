@@ -5,7 +5,8 @@
 , fetchurl ? pkgs.fetchurl
 , nix-index ? pkgs.nix-index
 , nix ? pkgs.nix
-, fzy ? pkgs.fzy
+, ruby ? pkgs.ruby
+, fzf ? pkgs.fzf
 , makeWrapper ? pkgs.makeWrapper
 , runCommand ? pkgs.runCommand
 
@@ -39,21 +40,19 @@ stdenv.mkDerivation rec {
 
   src = ./.;
 
-  buildInputs = [ nix-index.out nix.out fzy.out ];
+  buildInputs = [ nix-index nix fzf ];
   nativeBuildInputs = [ makeWrapper ];
 
-  installPhase = let
-    caseCondition = lib.concatStringsSep "|" (overlayPackages ++ [ "--placeholder--" ]);
-  in ''
+  installPhase = ''
     mkdir -p $out/bin
-    sed -e 's/@OVERLAY_PACKAGES@/${caseCondition}/' < , > $out/bin/,
+    sed \
+      -e 's|#!ruby|#!${ruby}/bin/ruby|' \
+      -e 's|@PATH_PREPEND@|${lib.makeBinPath buildInputs}|' \
+      -e 's|@NIX_INDEX_DB@|${nixIndexDB}|' \
+      -e 's|@OVERLAY_PACKAGES@|${lib.concatStringsSep ":" overlayPackages}|' \
+      < , > $out/bin/,
     chmod +x $out/bin/,
-    wrapProgram $out/bin/, \
-      --set NIX_INDEX_DB ${nixIndexDB.out} \
-      --prefix PATH : ${nix-index.out}/bin \
-      --prefix PATH : ${nix.out}/bin \
-      --prefix PATH : ${fzy.out}/bin
 
-    ln -s $out/bin/, $out/bin/comma
+    ${ruby}/bin/ruby install-symlinks $out/bin
   '';
 }
