@@ -19,8 +19,7 @@ module Comma
 
       \1,sl  \2<regex>       \3: \4(list nix-store entries matching regex)\6
       \1,sx  \2<store-path*> \3: \5nix-store --realise\6
-
-      \1,qs  \2<store-path*> \3: \5nix show-derivation\6
+      \1,sd  \2<store-path*> \3: \5nix show-derivation\6
 
       \1,qo  \2<store-path*> \3: \5nix-store --query --outputs\6
       \1,qd  \2<store-path*> \3: \5nix-store --query --deriver\6
@@ -73,9 +72,9 @@ module Comma
         usage(stderr)
         exit(0)
 
-      when ',ql'
+      when ',sl'
         q_list(Regexp.new(argv.first || ''))
-      when ',qs'
+      when ',sd'
         exec('nix', 'show-derivation', *store_paths(argv, stdin))
 
       when ',qo'
@@ -92,7 +91,7 @@ module Comma
       when ',q++'
         exec('nix-store', '--query', '--referers-closure', *store_paths(argv, stdin))
 
-      when ',qx'
+      when ',sx'
         exec('nix-store', '--realise', *store_paths(argv, stdin))
 
       else
