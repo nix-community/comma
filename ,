@@ -1,10 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # usage example:
 #   $ , yarn --help
 # This finds a derivation providing a bin/yarn, and runs it with `nix run`.
 # If there are multiple candidates, the user chooses one using `fzy`.
 set -euo pipefail
+
+picker=fzy
+if [ -n "${COMMA_PICKER+1}" ]; then
+  picker="${COMMA_PICKER}"
+fi
+
+# Test that the picker exists
+if ! [ -x "$(command -v "${picker}")" ]; then
+  >&2 echo "picker ${picker} is not found in PATH"
+  exit 1
+fi
 
 if [[ $# -lt 1 ]]; then
   >&2 echo "usage: , <program> [arguments]"
@@ -27,7 +38,7 @@ case "${argv0}" in
   *)
     attr="$(nix-locate --db "${NIX_INDEX_DB}" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
     if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
-      attr="$(echo "${attr}" | fzy)"
+      attr="$(echo "${attr}" | "${picker}")"
     fi
     ;;
 esac
