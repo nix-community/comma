@@ -8,6 +8,7 @@
 , fzy ? pkgs.fzy
 , makeWrapper ? pkgs.makeWrapper
 , runCommand ? pkgs.runCommand
+, linkFarm ? pkgs.linkFarm
 
 # We use this to add matchers for stuff that's not in upstream nixpkgs, but is
 # in our own overlay. No fuzzy matching from multiple options here, it's just:
@@ -27,19 +28,17 @@ let
 
   # nix-locate needs the --db argument to be a directory containing a file
   # named "files".
-  nixIndexDB = runCommand "nix-index-cache" {} ''
-    mkdir $out
-    ln -s ${indexCache.out} $out/files
-  '';
+  nixIndexDB = linkFarm "nix-index-cache" [
+    { name = "files"; path = indexCache; }
+  ];
 
 in
-
 stdenv.mkDerivation rec {
   name = "comma";
 
   src = ./.;
 
-  buildInputs = [ nix-index.out nix.out fzy.out ];
+  buildInputs = [ nix-index nix fzy ];
   nativeBuildInputs = [ makeWrapper ];
 
   installPhase = let
@@ -49,10 +48,10 @@ stdenv.mkDerivation rec {
     sed -e 's/@OVERLAY_PACKAGES@/${caseCondition}/' < , > $out/bin/,
     chmod +x $out/bin/,
     wrapProgram $out/bin/, \
-      --set NIX_INDEX_DB ${nixIndexDB.out} \
-      --prefix PATH : ${nix-index.out}/bin \
-      --prefix PATH : ${nix.out}/bin \
-      --prefix PATH : ${fzy.out}/bin
+      --set PREBUILT_NIX_INDEX_DB ${nixIndexDB} \
+      --prefix PATH : ${nix-index}/bin \
+      --prefix PATH : ${nix}/bin \
+      --prefix PATH : ${fzy}/bin
 
     ln -s $out/bin/, $out/bin/comma
   '';
