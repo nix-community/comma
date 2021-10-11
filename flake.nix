@@ -5,6 +5,9 @@
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
   outputs = { self, nixpkgs, flake-utils }:
+    let
+      mkComma = pkgs: import ./default.nix { inherit pkgs; };
+    in
     flake-utils.lib.eachDefaultSystem
       (
         system:
@@ -14,12 +17,12 @@
         rec {
           defaultPackage = packages.comma;
           packages = flake-utils.lib.flattenTree {
-            comma = import ./default.nix { inherit pkgs; };
+            comma = mkComma pkgs;
           };
         }
       ) // {
       overlay = final: prev: {
-        comma = import ./default.nix { pkgs = final; };
+        comma = mkComma final;
       };
     };
 }
