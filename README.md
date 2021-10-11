@@ -11,6 +11,61 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 nix-env -i -f .
 ```
 
+### With nix flakes (experimental)
+
+Two flake attributes are provided: `overlay` and `defaultPackage.${system}`.
+
+You can add it via `overlay` (preferred) as follows:
+
+```nix
+{
+  inputs.comma.url = "github:Shopify/comma";
+
+  outputs = { self, nixpkgs, comma }:
+    let
+      system = "x86_64-linux"; # replace this with your system arch
+      overlays = [ comma.overlay ]
+      pkgs = import nixpkgs { inherit system overlays; };
+    in
+    {
+      devShell.${system} = pkgs.mkShell {
+        name = "cool-stuff";
+        buildInputs = [
+          pkgs.comma # injected via overlay
+          # ...
+        ];
+      };
+    };
+}
+```
+
+You can add it via `defaultPackage.${system}` as follows:
+
+```nix
+{
+  inputs.comma.url = "github:Shopify/comma";
+
+  # not mandatory but highly recommended
+  # if not provided, it will use the nixpkgs referenced by this repo (https://github.com/Shopify/comma)
+  inputs.comma.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { self, nixpkgs, comma }:
+    let
+      system = "x86_64-linux"; # replace this with your system arch
+      pkgs = import nixpkgs { inherit system; };
+    in
+    {
+      devShell.${system} = pkgs.mkShell {
+        name = "cool-stuff";
+        buildInputs = [
+          comma.defaultPackage.${system} # or comma.packages.${system}.comma
+          # ...
+        ];
+      };
+    };
+}
+```
+
 ## Usage
 
 [See a quick demo on
