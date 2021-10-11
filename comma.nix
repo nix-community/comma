@@ -28,7 +28,7 @@ let
   # named "files".
   nixIndexDB = runCommand "nix-index-cache" { } ''
     mkdir $out
-    ln -s ${indexCache.out} $out/files
+    ln -s ${indexCache} $out/files
   '';
 
 in
@@ -38,7 +38,6 @@ stdenv.mkDerivation rec {
 
   src = ./.;
 
-  buildInputs = [ nix-index.out nix.out fzy.out ];
   nativeBuildInputs = [ makeWrapper ];
 
   installPhase =
@@ -50,11 +49,11 @@ stdenv.mkDerivation rec {
       sed -e 's/@OVERLAY_PACKAGES@/${caseCondition}/' < , > $out/bin/,
       chmod +x $out/bin/,
       wrapProgram $out/bin/, \
-        --set NIX_INDEX_DB ${nixIndexDB.out} \
+        --set NIX_INDEX_DB ${nixIndexDB} \
         --suffix NIX_PATH : nixpkgs=${pkgs.path} \
-        --prefix PATH : ${nix-index.out}/bin \
-        --prefix PATH : ${nix.out}/bin \
-        --prefix PATH : ${fzy.out}/bin
+        --prefix PATH : ${nix-index}/bin \
+        --prefix PATH : ${nix}/bin \
+        --prefix PATH : ${fzy}/bin
 
       ln -s $out/bin/, $out/bin/comma
     '';
