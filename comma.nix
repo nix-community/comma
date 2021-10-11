@@ -1,4 +1,5 @@
-{ stdenv
+{ pkgs
+, stdenv
 , lib
 , fetchurl
 , nix-index
@@ -50,6 +51,7 @@ stdenv.mkDerivation rec {
       chmod +x $out/bin/,
       wrapProgram $out/bin/, \
         --set NIX_INDEX_DB ${nixIndexDB.out} \
+        --suffix NIX_PATH : nixpkgs=${pkgs.path} \
         --prefix PATH : ${nix-index.out}/bin \
         --prefix PATH : ${nix.out}/bin \
         --prefix PATH : ${fzy.out}/bin
