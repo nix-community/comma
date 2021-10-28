@@ -6,6 +6,11 @@
 # If there are multiple candidates, the user chooses one using `fzy`.
 set -euo pipefail
 
+dbOutdatedError(){
+  echo "The database used by comma might be outdate. To update it, run:"
+  echo ", --update"
+}
+
 if [[ $# -lt 1 ]]; then
   >&2 echo "usage: , <program> [arguments]"
   exit 1
@@ -14,8 +19,18 @@ fi
 if [[ "$1" == "--install" ]] || [[ "$1" == "-i" ]]; then
   install=1
   shift
+elif [[ "$1" == "--update" ]] || [[ "$1" == "-u" ]]; then
+  ${UPDATE_SCRIPT}
+  exit
 else
   install=""
+fi
+
+# install nix index db
+if [ ! -d "$HOME/.cache/nix-index" ]; then
+  echo "installing default index DB to '$HOME/.cache/nix-index'"
+  mkdir -p "$HOME/.cache/nix-index"
+  cp -r "${NIX_INDEX_DB}" "$HOME/.cache/nix-index"
 fi
 
 argv0=$1; shift
@@ -25,7 +40,7 @@ case "${argv0}" in
     attr="${argv0}"
     ;;
   *)
-    attr="$(nix-locate --db "${NIX_INDEX_DB}" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
+    attr="$(nix-locate --db "$HOME/.cache/nix-index" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
     if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
       attr="$(echo "${attr}" | fzy)"
     fi
@@ -37,8 +52,16 @@ if [[ -z $attr ]]; then
   exit 1
 fi
 
-if [[ -n $install ]]; then
-  nix-env -iA "nixpkgs.${attr%%.*}"
+# on flake based installations nixpkgs is specified via
+# flake input and therefore NIX_PATH might be unset
+if echo $NIX_PATH | grep -q "nixpkgs="; then
+  nixArgs=""
 else
-  nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
+  nixArgs="-I nixpkgs=${NIXPKGS}"
+fi
+
+if [[ -n $install ]]; then
+  nix-env $nixArgs -iA "nixpkgs.${attr%%.*}" || dbOutdatedError
+else
+  nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@" || dbOutdatedError
 fi

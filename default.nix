@@ -8,6 +8,7 @@
 , fzy ? pkgs.fzy
 , makeWrapper ? pkgs.makeWrapper
 , runCommand ? pkgs.runCommand
+, updateScript ? import ./update-index.nix { inherit pkgs; }
 
 # We use this to add matchers for stuff that's not in upstream nixpkgs, but is
 # in our own overlay. No fuzzy matching from multiple options here, it's just:
@@ -50,6 +51,8 @@ stdenv.mkDerivation rec {
     chmod +x $out/bin/,
     wrapProgram $out/bin/, \
       --set NIX_INDEX_DB ${nixIndexDB.out} \
+      --set NIXPKGS ${pkgs.path} \
+      --set UPDATE_SCRIPT ${updateScript} \
       --prefix PATH : ${nix-index.out}/bin \
       --prefix PATH : ${nix.out}/bin \
       --prefix PATH : ${fzy.out}/bin
