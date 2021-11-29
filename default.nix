@@ -4,7 +4,7 @@
 , lib ? pkgs.lib
 , fetchurl ? pkgs.fetchurl
 , nix-index ? pkgs.nix-index
-, nix ? pkgs.nix
+, nix ? pkgs.nix_2_3
 , fzy ? pkgs.fzy
 , makeWrapper ? pkgs.makeWrapper
 , runCommand ? pkgs.runCommand
@@ -50,6 +50,7 @@ stdenv.mkDerivation rec {
     sed -e 's/@OVERLAY_PACKAGES@/${caseCondition}/' < , > $out/bin/,
     chmod +x $out/bin/,
     wrapProgram $out/bin/, \
+      --set NIX ${nix} \
       --set NIX_INDEX_DB ${nixIndexDB.out} \
       --set NIXPKGS ${pkgs.path} \
       --set UPDATE_SCRIPT ${updateScript} \

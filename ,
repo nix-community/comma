@@ -63,5 +63,5 @@ fi
 if [[ -n $install ]]; then
   nix-env $nixArgs -iA "nixpkgs.${attr%%.*}" || dbOutdatedError
 else
-  nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@" || dbOutdatedError
+  $NIX/bin/nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@" || dbOutdatedError
 fi
