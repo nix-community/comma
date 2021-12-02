@@ -40,7 +40,7 @@ case "${argv0}" in
     attr="${argv0}"
     ;;
   *)
-    attr="$(nix-locate --db "$HOME/.cache/nix-index" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
+    attr="$(nix-locate --db "${XDG_CACHE_HOME:-$HOME/.cache}/nix-index" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
     if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
       attr="$(echo "${attr}" | fzy)"
     fi
