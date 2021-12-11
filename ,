@@ -40,5 +40,15 @@ fi
 if [[ -n $install ]]; then
   nix-env -iA "nixpkgs.${attr%%.*}"
 else
-  nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
+  nix_version_greater_or_equal() {
+    local nix_version
+    nix_version=$(nix --version | cut -f3 -d ' ')
+    printf '%s\n%s' "$1" "$nix_version" | sort -C -V
+  }
+
+  if nix_version_greater_or_equal "2.4"; then
+    nix --extra-experimental-features 'nix-command flakes' shell "nixpkgs#${attr}" -c "${argv0}" "$@"
+  else
+    nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
+  fi
 fi
