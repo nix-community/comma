@@ -6,11 +6,6 @@
 # If there are multiple candidates, the user chooses one using `fzy`.
 set -euo pipefail
 
-dbOutdatedError(){
-  echo "The database used by comma might be outdate. To update it, run:"
-  echo ", --update"
-}
-
 if [[ $# -lt 1 ]]; then
   >&2 echo "usage: , <program> [arguments]"
   exit 1
@@ -61,7 +56,7 @@ else
 fi
 
 if [[ -n $install ]]; then
-  nix-env $nixArgs -iA "nixpkgs.${attr%%.*}" || dbOutdatedError
+  nix-env $nixArgs -iA "nixpkgs.${attr%%.*}"
 else
-  $NIX/bin/nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@" || dbOutdatedError
+  $NIX/bin/nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@"
 fi
