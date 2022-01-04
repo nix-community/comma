@@ -1,10 +1,21 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # usage example:
 #   $ , yarn --help
 # This finds a derivation providing a bin/yarn, and runs it with `nix run`.
 # If there are multiple candidates, the user chooses one using `fzy`.
 set -euo pipefail
+
+picker=fzy
+if [ -n "${COMMA_PICKER+1}" ]; then
+  picker="${COMMA_PICKER}"
+fi
+
+# Test that the picker exists
+if ! [ -x "$(command -v "${picker}")" ]; then
+  >&2 echo "picker ${picker} is not found in PATH"
+  exit 1
+fi
 
 if [[ $# -lt 1 ]]; then
   >&2 echo "usage: , <program> [arguments]"
@@ -21,11 +32,11 @@ else
   install=""
 fi
 
-# install nix index db
-if [ ! -d "$HOME/.cache/nix-index" ]; then
-  echo "installing default index DB to '$HOME/.cache/nix-index'"
-  mkdir -p "$HOME/.cache/nix-index"
-  cp -r "${NIX_INDEX_DB}" "$HOME/.cache/nix-index"
+# if a nix-index exists locally; use that as it's likely much more recent
+# than the prebuilt one.
+database=$PREBUILT_NIX_INDEX_DB
+if [ -f "${HOME}/.cache/nix-index/files" ]; then
+    database="${HOME}/.cache/nix-index"
 fi
 
 argv0=$1; shift
@@ -35,9 +46,9 @@ case "${argv0}" in
     attr="${argv0}"
     ;;
   *)
-    attr="$(nix-locate --db "${XDG_CACHE_HOME:-$HOME/.cache}/nix-index" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
+    attr="$(nix-locate --db "${database}" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
     if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
-      attr="$(echo "${attr}" | fzy)"
+      attr="$(echo "${attr}" | "${picker}")"
     fi
     ;;
 esac
@@ -58,5 +69,15 @@ fi
 if [[ -n $install ]]; then
   nix-env $nixArgs -iA "nixpkgs.${attr%%.*}"
 else
-  $NIX/bin/nix run $nixArgs "nixpkgs.${attr}" -c "${argv0}" "$@"
+  nix_version_greater_or_equal() {
+    local nix_version
+    nix_version=$(nix --version | cut -f3 -d ' ')
+    printf '%s\n%s' "$1" "$nix_version" | sort -C -V
+  }
+
+  if nix_version_greater_or_equal "2.4"; then
+    nix --extra-experimental-features 'nix-command flakes' shell "${NIXPKGS}#${attr}" -c "${argv0}" "$@"
+  else
+    nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
+  fi
 fi
