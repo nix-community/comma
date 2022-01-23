@@ -7,6 +7,7 @@
 , fzy
 , makeWrapper
 , runCommand
+, linkFarm
 
   # We use this to add matchers for stuff that's not in upstream nixpkgs, but is
   # in our own overlay. No fuzzy matching from multiple options here, it's just:
