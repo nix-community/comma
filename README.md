@@ -19,7 +19,7 @@ You can add it via `overlay` (preferred) as follows:
 
 ```nix
 {
-  inputs.comma.url = "github:Shopify/comma";
+  inputs.comma.url = "github:nix-community/comma";
 
   outputs = { self, nixpkgs, comma }:
     let
@@ -43,10 +43,10 @@ You can add it via `defaultPackage.${system}` as follows:
 
 ```nix
 {
-  inputs.comma.url = "github:Shopify/comma";
+  inputs.comma.url = "github:nix-community/comma";
 
   # not mandatory but highly recommended
-  # if not provided, it will use the nixpkgs referenced by this repo (https://github.com/Shopify/comma)
+  # if not provided, it will use the nixpkgs referenced by this repo (https://github.com/nix-community/comma)
   inputs.comma.inputs.nixpkgs.follows = "nixpkgs";
 
   outputs = { self, nixpkgs, comma }:
