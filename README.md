@@ -11,9 +11,21 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 nix-env -i -f .
 ```
 
-### With nix flakes (experimental)
+### With nix flakes
 
-Two flake attributes are provided: `overlay` and `defaultPackage.${system}`.
+The simplest way to use this as a nix flake is to do `nix run github:nix-community/comma -- <your command>`.  This is a little verbose, but you can create a convenient shell alias as follows:
+
+```bash
+alias ,="nix run github:nix-community/comma --"
+
+# or if you want to override comma's nixpkgs input, do the following instead
+# (replacing `nixpkgs` with whichever nixpkgs-providing flake you want)
+alias ,="nix run github:nix-community/comma --inputs-from nixpkgs --"
+```
+
+Then you can invoke your command as `, <your command>`
+
+If you want to make comma available slightly more declaratively, two flake attributes are provided: `overlay` and `defaultPackage.${system}`.
 
 You can add it via `overlay` (preferred) as follows:
 
