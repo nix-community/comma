@@ -1,7 +1,7 @@
 {
   description = "Comma runs software without installing it";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/21.05";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/21.11";
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
   outputs = { self, nixpkgs, flake-utils }:
