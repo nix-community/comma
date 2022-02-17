@@ -25,6 +25,9 @@ fi
 if [[ "$1" == "--install" ]] || [[ "$1" == "-i" ]]; then
   install=1
   shift
+elif [[ "$1" == "--update" ]] || [[ "$1" == "-u" ]]; then
+  ${UPDATE_SCRIPT}
+  exit
 else
   install=""
 fi
@@ -55,8 +58,16 @@ if [[ -z $attr ]]; then
   exit 1
 fi
 
+# on flake based installations nixpkgs is specified via
+# flake input and therefore NIX_PATH might be unset
+if echo $NIX_PATH | grep -q "nixpkgs="; then
+  nixArgs=""
+else
+  nixArgs="-I nixpkgs=${NIXPKGS}"
+fi
+
 if [[ -n $install ]]; then
-  nix-env -iA "nixpkgs.${attr%%.*}"
+  nix-env $nixArgs -iA "nixpkgs.${attr%%.*}"
 else
   nix_version_greater_or_equal() {
     local nix_version
@@ -65,7 +76,7 @@ else
   }
 
   if nix_version_greater_or_equal "2.4"; then
-    nix --extra-experimental-features 'nix-command flakes' shell "nixpkgs#${attr}" -c "${argv0}" "$@"
+    nix --extra-experimental-features 'nix-command flakes' shell "${NIXPKGS}#${attr}" -c "${argv0}" "$@"
   else
     nix run "nixpkgs.${attr}" -c "${argv0}" "$@"
   fi

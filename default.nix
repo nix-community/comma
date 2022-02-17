@@ -8,6 +8,7 @@
 , fzy ? pkgs.fzy
 , makeWrapper ? pkgs.makeWrapper
 , runCommand ? pkgs.runCommand
+, updateScript ? import ./update-index.nix { inherit pkgs; }
 , linkFarm ? pkgs.linkFarm
 
 # We use this to add matchers for stuff that's not in upstream nixpkgs, but is
@@ -48,6 +49,8 @@ stdenv.mkDerivation rec {
     chmod +x $out/bin/,
     wrapProgram $out/bin/, \
       --set PREBUILT_NIX_INDEX_DB ${nixIndexDB} \
+      --set NIXPKGS ${pkgs.path} \
+      --set UPDATE_SCRIPT ${updateScript} \
       --prefix PATH : ${nix-index}/bin \
       --prefix PATH : ${nix}/bin \
       --prefix PATH : ${fzy}/bin
