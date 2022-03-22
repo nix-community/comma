@@ -18,13 +18,21 @@
 }:
 
 let
+  indexCaches = {
+    x86_64-linux = fetchurl {
+      url = "https://github.com/Mic92/nix-index-database/releases/download/2021-12-12/index-x86_64-linux";
+      hash = "sha256-+SoG5Qz2KWA/nIWXE6SLpdi8MDqTs8LY90fGZxGKOiA=";
+    };
+
+    x86_64-darwin = fetchurl {
+      url = "https://github.com/Mic92/nix-index-database/releases/download/2022-02-27/index-x86_64-darwin";
+      hash = "sha256-sHGUSjd6EOpzdWtS5FGtTkS9KEKvDCGMHTYVwxOkZIo=";
+    };
+  };
 
   # nix-index takes a little while to run and the contents don't change
   # meaningfully very often.
-  indexCache = fetchurl {
-    url = "https://github.com/Mic92/nix-index-database/releases/download/2021-12-12/index-x86_64-linux";
-    sha256 = "sha256-+SoG5Qz2KWA/nIWXE6SLpdi8MDqTs8LY90fGZxGKOiA=";
-  };
+  indexCache = indexCaches.${stdenv.hostPlatform.system} or (throw "unsupported system: ${stdenv.hostPlatform.system}");
 
   # nix-locate needs the --db argument to be a directory containing a file
   # named "files".
