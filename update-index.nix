@@ -23,6 +23,5 @@ writeScript "update-index" ''
     nixpkgs="-I nixpkgs=${pkgs.path}"
   fi
 
-  mkdir -p $HOME/.cache/comma/
   nix-index -d $HOME/.cache/nix-index -f $nixpkgs
 ''
