@@ -9,7 +9,7 @@
   let
     b = builtins;
     lib = nixpkgs.lib;
-    supportedSystems = [ "x86_64-linux" "x86_64-darwin" ];
+    supportedSystems = lib.systems.supported.hydra;
     forAllSystems = f: lib.genAttrs supportedSystems
       (system: f system (import nixpkgs { inherit system; }));
   in
