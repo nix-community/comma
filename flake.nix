@@ -19,18 +19,10 @@
       (system: pkgs: {
         comma = import ./default.nix {
           inherit pkgs;
-          updateScript = apps."${system}".update-index.program;
         };
       });
 
     defaultPackage = forAllSystems (system: pkgs: packages."${system}".comma);
 
-    apps = forAllSystems
-      (system: pkgs: {
-        update-index = {
-          type = "app";
-          program = b.toString (pkgs.callPackage ./update-index.nix {});
-        };
-      });
   };
 }

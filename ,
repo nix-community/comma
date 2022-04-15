@@ -25,18 +25,8 @@ fi
 if [[ "$1" == "--install" ]] || [[ "$1" == "-i" ]]; then
   install=1
   shift
-elif [[ "$1" == "--update" ]] || [[ "$1" == "-u" ]]; then
-  ${UPDATE_SCRIPT}
-  exit
 else
   install=""
-fi
-
-# if a nix-index exists locally; use that as it's likely much more recent
-# than the prebuilt one.
-database=$PREBUILT_NIX_INDEX_DB
-if [ -f "${HOME}/.cache/nix-index/files" ]; then
-    database="${HOME}/.cache/nix-index"
 fi
 
 argv0=$1; shift
@@ -46,7 +36,7 @@ case "${argv0}" in
     attr="${argv0}"
     ;;
   *)
-    attr="$(nix-locate --db "${database}" --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
+    attr="$(nix-locate  --top-level --minimal --at-root --whole-name "/bin/${argv0}")"
     if [[ "$(echo "${attr}" | wc -l)" -ne 1 ]]; then
       attr="$(echo "${attr}" | "${picker}")"
     fi
