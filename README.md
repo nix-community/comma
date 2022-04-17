@@ -19,3 +19,8 @@ YouTube](https://www.youtube.com/watch?v=VUM3Km_4gUg&list=PLRGI9KQ3_HP_OFRG6R-p4
 ```bash
 , cowsay neato
 ```
+
+
+## Prebuilt index
+
+https://github.com/Mic92/nix-index-database
