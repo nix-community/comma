@@ -19,6 +19,24 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
   $ nix-env -i -f "https://github.com/nix-community/comma/archive/master.tar.gz"
   ```
 
+## NixOS installation
+
+- No flakes:
+
+  replace "v1.2.0" with the latest version
+
+  ```nix
+  environment.systemPackages =
+  let
+    comma = (import (pkgs.fetchFromGitHub {
+      owner = "nix-community";
+      repo = "comma";
+      rev = "v1.2.0";
+      sha256 = "0000000000000000000000000000000000000000000000000000";
+    })).default;
+  in [ comma ];
+  ```
+
 ## Usage
 
 ```bash
