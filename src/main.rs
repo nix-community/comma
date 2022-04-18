@@ -61,14 +61,15 @@ fn main() {
                 .takes_value(false)
                 .help("install the derivation containing the executable"),
         )
+        .arg(Arg::new("picker")
+            .long("picker")
+            .env("COMMA_PICKER")
+            .takes_value(true)
+            .default_value("fzy")
+            )
         .trailing_var_arg(true)
         .arg(arg!(<cmd> ... "command to run"))
         .get_matches();
-
-    let picker = match env::var("COMMA_PICKER") {
-        Ok(val) => val,
-        Err(_) => "fzy".to_string(),
-    };
 
     let install = matches.is_present("install");
 
@@ -94,7 +95,7 @@ fn main() {
         .collect();
 
     let choice = if attrs.len() != 1 {
-        pick(&picker, attrs)
+        pick(matches.value_of("picker").unwrap(), attrs)
     } else {
         attrs.first().unwrap().trim().to_string()
     };
