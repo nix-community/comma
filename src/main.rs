@@ -5,7 +5,7 @@ use std::{
     process::{exit, Command, Stdio},
 };
 
-use clap::{arg, Arg};
+use clap::{arg, Arg, crate_version};
 
 fn pick(picker: &str, derivations: Vec<&str>) -> String {
     let mut picker_process = Command::new(&picker)
@@ -54,6 +54,7 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: Vec<&str>)
 fn main() {
     let matches = clap::Command::new("comma")
         .about("runs programs without installing them")
+        .version(crate_version!())
         .arg(
             Arg::new("install")
                 .short('i')
