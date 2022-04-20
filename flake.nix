@@ -31,7 +31,7 @@
             overrideMain = _: {
               postInstall = ''
                 wrapProgram $out/bin/comma \
-                  --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy ])}
+                  --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
                 ln -s $out/bin/comma $out/bin/,
               '';
             };
