@@ -14,28 +14,39 @@
     };
   };
 
-  outputs = { self, nixpkgs, utils, naersk, flake-compat }:
-    utils.lib.eachDefaultSystem (system:
-      let
-        inherit (nixpkgs) lib;
-        pkgs = nixpkgs.legacyPackages.${system};
-        naersk-lib = pkgs.callPackage naersk { };
-      in
-      {
-        packages = {
-          default = self.packages."${system}".comma;
+  outputs = { self, nixpkgs, utils, naersk, flake-compat }: {
+      overlays.default = final: prev:
+        let
+          naersk-lib = final.callPackage naersk { };
+        in
+        {
           comma = naersk-lib.buildPackage {
             pname = "comma";
             root = ./.;
-            nativeBuildInputs = with pkgs; [ makeWrapper ];
+            nativeBuildInputs = with final; [ makeWrapper ];
             overrideMain = _: {
               postInstall = ''
                 wrapProgram $out/bin/comma \
-                  --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
+                  --prefix PATH : ${final.lib.makeBinPath (with final; [ nix fzy nix-index-unwrapped ])}
                 ln -s $out/bin/comma $out/bin/,
               '';
             };
           };
+      };
+    }
+    //
+    utils.lib.eachDefaultSystem (system:
+      let
+        inherit (nixpkgs) lib;
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ self.overlays.default ];
+        };
+      in
+      {
+        packages = {
+          default = self.packages."${system}".comma;
+          inherit (pkgs) comma;
         };
 
         apps.default = utils.lib.mkApp {
