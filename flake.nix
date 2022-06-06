@@ -15,36 +15,48 @@
   };
 
   outputs = { self, nixpkgs, utils, naersk, flake-compat }:
-    utils.lib.eachDefaultSystem (system:
-      let
-        inherit (nixpkgs) lib;
-        pkgs = nixpkgs.legacyPackages.${system};
-        naersk-lib = pkgs.callPackage naersk { };
-      in
-      {
-        packages = {
-          default = self.packages."${system}".comma;
-          comma = naersk-lib.buildPackage {
-            pname = "comma";
-            root = ./.;
-            nativeBuildInputs = with pkgs; [ makeWrapper ];
-            overrideMain = _: {
-              postInstall = ''
-                wrapProgram $out/bin/comma \
-                  --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
-                ln -s $out/bin/comma $out/bin/,
-              '';
-            };
+    let
+      inherit (nixpkgs) lib;
+      commaLambda = pkgs:
+        let
+          naersk-lib = pkgs.callPackage naersk { };
+        in
+        naersk-lib.buildPackage {
+          pname = "comma";
+          root = ./.;
+          nativeBuildInputs = with pkgs; [ makeWrapper ];
+          overrideMain = _: {
+            postInstall = ''
+              wrapProgram $out/bin/comma \
+                --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
+              ln -s $out/bin/comma $out/bin/,
+            '';
           };
         };
+    in
+    utils.lib.eachDefaultSystem
+      (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          packages = {
+            default = self.packages."${system}".comma;
+            comma = commaLambda pkgs;
+          };
 
-        apps.default = utils.lib.mkApp {
-          drv = self.packages."${system}".default;
-        };
+          apps.default = utils.lib.mkApp {
+            drv = self.packages."${system}".default;
+          };
 
-        devShells.default = with pkgs; mkShell {
-          nativeBuildInputs = [ cargo rustc rustfmt rustPackages.clippy fzy ];
-          RUST_SRC_PATH = rustPlatform.rustLibSrc;
-        };
+          devShells.default = with pkgs; mkShell {
+            nativeBuildInputs = [ cargo rustc rustfmt rustPackages.clippy fzy ];
+            RUST_SRC_PATH = rustPlatform.rustLibSrc;
+          };
+        })
+    // {
+      overlays.default = (final: prev: {
+        comma = commaLambda prev;
       });
+    };
 }
