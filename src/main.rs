@@ -2,18 +2,18 @@ use std::{
     env,
     io::Write,
     os::unix::prelude::CommandExt,
-    process::{exit, Command, Stdio},
+    process::{Command, ExitCode, Stdio},
 };
 
 use clap::crate_version;
 use clap::Parser;
 
-fn pick(picker: &str, derivations: Vec<&str>) -> String {
+fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     let mut picker_process = Command::new(&picker)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .unwrap_or_else(|err| panic!("failed to execute {}: {}", picker, err));
+        .unwrap_or_else(|err| panic!("failed to execute {picker}: {err}"));
 
     let picker_stdin = picker_process.stdin.as_mut().unwrap();
 
@@ -24,15 +24,17 @@ fn pick(picker: &str, derivations: Vec<&str>) -> String {
     let output = picker_process.wait_with_output().unwrap().stdout;
 
     if output.is_empty() {
-        exit(1)
+        return None;
     }
-    std::str::from_utf8(&output)
-        .expect("fail")
-        .trim()
-        .to_string()
+    Some(
+        std::str::from_utf8(&output)
+            .unwrap_or_else(|e| panic!("{picker} outputted invalid UTF-8: {e}"))
+            .trim()
+            .to_owned(),
+    )
 }
 
-fn run_command(use_channel: bool, choice: &str, command: &str, trail: Vec<&str>) {
+fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String]) {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -52,11 +54,11 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: Vec<&str>)
     run_cmd.exec();
 }
 
-fn main() {
+fn main() -> ExitCode {
     let args = Opt::parse();
 
-    let mut trail: Vec<&str> = args.cmd.iter().map(|x| &**x).collect();
-    let command: String = trail.remove(0).to_string();
+    let command = &args.cmd[0];
+    let trail = &args.cmd[1..];
 
     let attrs = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
@@ -67,24 +69,27 @@ fn main() {
 
     if attrs.is_empty() {
         eprintln!("no match");
-        std::process::exit(1)
+        return ExitCode::FAILURE;
     }
 
-    let attrs: Vec<&str> = std::str::from_utf8(&attrs)
+    let attrs: Vec<_> = std::str::from_utf8(&attrs)
         .expect("fail")
         .trim()
         .split('\n')
         .collect();
 
-    let choice = if attrs.len() != 1 {
-        pick(&args.picker, attrs)
+    let choice = if attrs.len() > 1 {
+        match pick(&args.picker, &attrs) {
+            Some(x) => x,
+            None => return ExitCode::FAILURE,
+        }
     } else {
-        attrs.first().unwrap().trim().to_string()
+        attrs.first().unwrap().trim().to_owned()
     };
 
     let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
-        Err(_) => "".to_string(),
+        Err(_) => "".to_owned(),
     }
     .contains("nixpkgs");
 
@@ -93,8 +98,10 @@ fn main() {
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
     } else {
-        run_command(use_channel, &choice, &command, trail)
+        run_command(use_channel, &choice, command, trail);
     }
+
+    ExitCode::SUCCESS
 }
 
 /// Runs programs without installing them
