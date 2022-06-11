@@ -5,7 +5,8 @@ use std::{
     process::{exit, Command, Stdio},
 };
 
-use clap::{arg, Arg, crate_version};
+use clap::crate_version;
+use clap::Parser;
 
 fn pick(picker: &str, derivations: Vec<&str>) -> String {
     let mut picker_process = Command::new(&picker)
@@ -52,29 +53,9 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: Vec<&str>)
 }
 
 fn main() {
-    let matches = clap::Command::new("comma")
-        .about("runs programs without installing them")
-        .version(crate_version!())
-        .arg(
-            Arg::new("install")
-                .short('i')
-                .long("install")
-                .takes_value(false)
-                .help("install the derivation containing the executable"),
-        )
-        .arg(Arg::new("picker")
-            .long("picker")
-            .env("COMMA_PICKER")
-            .takes_value(true)
-            .default_value("fzy")
-            )
-        .trailing_var_arg(true)
-        .arg(arg!(<cmd> ... "command to run"))
-        .get_matches();
+    let args = Opt::parse();
 
-    let install = matches.is_present("install");
-
-    let mut trail: Vec<&str> = matches.values_of("cmd").unwrap().collect();
+    let mut trail: Vec<&str> = args.cmd.iter().map(|x| &**x).collect();
     let command: String = trail.remove(0).to_string();
 
     let attrs = Command::new("nix-locate")
@@ -96,22 +77,38 @@ fn main() {
         .collect();
 
     let choice = if attrs.len() != 1 {
-        pick(matches.value_of("picker").unwrap(), attrs)
+        pick(&args.picker, attrs)
     } else {
         attrs.first().unwrap().trim().to_string()
     };
 
-    let use_channel = (match env::var("NIX_PATH") {
+    let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
         Err(_) => "".to_string(),
-    })
+    }
     .contains("nixpkgs");
 
-    if install {
+    if args.install {
         Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
     } else {
         run_command(use_channel, &choice, &command, trail)
     }
+}
+
+/// Runs programs without installing them
+#[derive(Parser)]
+#[clap(version = crate_version!(), trailing_var_arg = true)]
+struct Opt {
+    /// Install the derivation containing the executable
+    #[clap(short, long)]
+    install: bool,
+
+    #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
+    picker: String,
+
+    /// Command to run
+    #[clap(required = true, name = "cmd")]
+    cmd: Vec<String>,
 }
