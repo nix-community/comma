@@ -7,6 +7,7 @@ use std::{
 
 use clap::crate_version;
 use clap::Parser;
+use std::time::{Duration, SystemTime};
 
 fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     let mut picker_process = Command::new(&picker)
@@ -54,11 +55,47 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String])
     run_cmd.exec();
 }
 
+/// Test whether the database is more than 30 days old
+fn is_database_old(database_file: std::path::PathBuf) -> bool {
+    let modified = match database_file.metadata() {
+        Ok(metadata) => metadata.modified().unwrap_or_else(|_| SystemTime::now()),
+        Err(_) => return false,
+    };
+    let time_since_modified = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or(Duration::new(0, 0));
+    if time_since_modified > Duration::from_secs(30 * 24 * 60 * 60) {
+        return true;
+    }
+    false
+}
+
+/// Prints warnings if the nix-index database is non-existent or out of date.
+fn check_database() {
+    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
+    let cache_dir = base.get_cache_home();
+    let database_file = cache_dir.join("files");
+    if !database_file.exists() {
+        println!("Warning: Nix-index database does not exist, try updating with `--update`.");
+    } else if is_database_old(database_file) {
+        println!(
+            "Warning: Nix-index database is older than 30 days, try updating with `--update`."
+        );
+    }
+}
+
 fn main() -> ExitCode {
     let args = Opt::parse();
 
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
+
+    if args.update {
+        println!("Updating nix-index database, takes around 5 minutes.");
+        Command::new("nix-index").exec();
+    }
+
+    check_database();
 
     let attrs = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
@@ -68,7 +105,7 @@ fn main() -> ExitCode {
         .stdout;
 
     if attrs.is_empty() {
-        eprintln!("no match");
+        eprintln!("No executable `{}` found in nix-index database.", command);
         return ExitCode::FAILURE;
     }
 
@@ -115,7 +152,11 @@ struct Opt {
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
+    /// Update nix-index database
+    #[clap(short, long)]
+    update: bool,
+
     /// Command to run
-    #[clap(required = true, name = "cmd")]
+    #[clap(required_unless_present = "update", name = "cmd")]
     cmd: Vec<String>,
 }
