@@ -58,12 +58,21 @@ fn main() {
     let mut trail: Vec<&str> = args.cmd.iter().map(|x| &**x).collect();
     let command: String = trail.remove(0).to_string();
 
-    let attrs = Command::new("nix-locate")
+    let command_output = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{}", command))
         .output()
-        .expect("failed to execute nix-locate")
-        .stdout;
+        .expect("failed to execute nix-locate");
+
+    if !command_output.status.success() {
+        match std::str::from_utf8(&command_output.stderr) {
+            Ok(stderr) => eprintln!("nix-locate failed: {}", stderr),
+            Err(_) => eprintln!("nix-locate failed")
+        }
+        std::process::exit(1)
+    }
+
+    let attrs = command_output.stdout;
 
     if attrs.is_empty() {
         eprintln!("no match");
