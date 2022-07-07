@@ -7,6 +7,7 @@ use std::{
 
 use clap::crate_version;
 use clap::Parser;
+use xdg;
 
 fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     let mut picker_process = Command::new(&picker)
@@ -60,8 +61,16 @@ fn main() -> ExitCode {
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
 
+    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
+    let mut cache_dir = base.get_cache_home().to_string_lossy().to_string();
+
+    if !args.database.is_empty() {
+        cache_dir = args.database;
+    }
+
     let attrs = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
+        .args(["--db", &cache_dir])
         .arg(format!("/bin/{}", command))
         .output()
         .expect("failed to execute nix-locate")
@@ -114,6 +123,10 @@ struct Opt {
 
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
+
+    /// Nix index database location
+    #[clap(required = false, long)]
+    database: String,
 
     /// Command to run
     #[clap(required = true, name = "cmd")]

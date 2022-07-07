@@ -10,3 +10,4 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "3.1.11", features = ["derive", "cargo", "env"] }
+xdg = "2.4.0"
