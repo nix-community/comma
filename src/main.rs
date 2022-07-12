@@ -58,13 +58,17 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String])
 fn main() -> ExitCode {
     let args = Opt::parse();
 
-    let command = &args.cmd[0];
-    let trail = &args.cmd[1..];
-
     if args.update {
-        println!("Updating nix-index database, takes around 5 minutes.");
         index::update_database();
     }
+
+    // The command may not be given if `--update` was specified.
+    if args.cmd.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+
+    let command = &args.cmd[0];
+    let trail = &args.cmd[1..];
 
     index::check_database();
 
