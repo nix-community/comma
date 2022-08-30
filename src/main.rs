@@ -34,7 +34,13 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     )
 }
 
-fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String]) {
+fn run_command(
+    use_channel: bool,
+    inputs_from: &Option<&str>,
+    choice: &str,
+    command: &str,
+    trail: &[String],
+) {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -47,6 +53,9 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String])
         run_cmd.args(["-f", "<nixpkgs>", choice]);
     } else {
         run_cmd.args([format!("nixpkgs#{}", choice)]);
+        if let Some(flake) = inputs_from {
+            run_cmd.args(["--inputs-from", flake]);
+        }
     }
 
     run_cmd.args(["--command", command]);
@@ -98,7 +107,7 @@ fn main() -> ExitCode {
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
     } else {
-        run_command(use_channel, &choice, command, trail);
+        run_command(use_channel, &args.inputs_from.as_deref(), &choice, command, trail);
     }
 
     ExitCode::SUCCESS
@@ -114,6 +123,9 @@ struct Opt {
 
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
+
+    #[clap(long, env = "COMMA_INPUTS_FROM")]
+    inputs_from: Option<String>,
 
     /// Command to run
     #[clap(required = true, name = "cmd")]
