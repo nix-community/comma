@@ -5,3 +5,5 @@ result
 # Added by cargo
 
 /target
+
+.direnv/
