@@ -1,3 +1,4 @@
+mod index;
 use std::{
     env,
     io::Write,
@@ -57,8 +58,19 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String])
 fn main() -> ExitCode {
     let args = Opt::parse();
 
+    if args.update {
+        index::update_database();
+    }
+
+    // The command may not be given if `--update` was specified.
+    if args.cmd.is_empty() {
+        return ExitCode::SUCCESS;
+    }
+
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
+
+    index::check_database();
 
     let attrs = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
@@ -68,7 +80,7 @@ fn main() -> ExitCode {
         .stdout;
 
     if attrs.is_empty() {
-        eprintln!("no match");
+        eprintln!("No executable `{}` found in nix-index database.", command);
         return ExitCode::FAILURE;
     }
 
@@ -115,7 +127,11 @@ struct Opt {
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
+    /// Update nix-index database
+    #[clap(short, long)]
+    update: bool,
+
     /// Command to run
-    #[clap(required = true, name = "cmd")]
+    #[clap(required_unless_present = "update", name = "cmd")]
     cmd: Vec<String>,
 }
