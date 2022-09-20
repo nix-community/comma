@@ -26,15 +26,16 @@ pub fn check_database() {
 
 /// Test whether the database is more than 30 days old
 fn is_database_old(database_file: std::path::PathBuf) -> bool {
-    let modified = match database_file.metadata() {
-        Ok(metadata) => metadata.modified().unwrap_or_else(|_| SystemTime::now()),
+    let metadata = match database_file.metadata() {
+        Ok(metadata) => metadata,
         Err(_) => return false,
     };
-    let time_since_modified = SystemTime::now()
-        .duration_since(modified)
+
+    let time_since_modified = metadata
+        .modified()
+        .unwrap_or_else(|_| SystemTime::now())
+        .elapsed()
         .unwrap_or(Duration::new(0, 0));
-    if time_since_modified > Duration::from_secs(30 * 24 * 60 * 60) {
-        return true;
-    }
-    false
+
+    time_since_modified > Duration::from_secs(30 * 24 * 60 * 60) && !metadata.permissions().readonly()
 }
