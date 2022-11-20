@@ -72,12 +72,21 @@ fn main() -> ExitCode {
 
     index::check_database();
 
-    let attrs = Command::new("nix-locate")
+    let nix_locate_output = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{}", command))
         .output()
-        .expect("failed to execute nix-locate")
-        .stdout;
+        .expect("failed to execute nix-locate");
+
+    if !nix_locate_output.status.success() {
+        match std::str::from_utf8(&nix_locate_output.stderr) {
+            Ok(stderr) => eprintln!("nix-locate failed with: {}", stderr),
+            Err(_) => eprint!("nix-locate failed"),
+        }
+        return ExitCode::FAILURE;
+    }
+
+    let attrs = nix_locate_output.stdout;
 
     if attrs.is_empty() {
         eprintln!("No executable `{}` found in nix-index database.", command);
