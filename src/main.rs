@@ -114,6 +114,14 @@ fn main() -> ExitCode {
     }
     .contains("nixpkgs");
 
+    if args.print_package {
+        println!(
+            "Package that contains executable /bin/{}: {}",
+            command,
+            &choice.rsplit('.').last().unwrap()
+        );
+    };
+
     if args.install {
         Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
@@ -139,6 +147,10 @@ struct Opt {
     /// Update nix-index database
     #[clap(short, long)]
     update: bool,
+
+    /// Print the package containing the executable
+    #[clap(long = "print-package")]
+    print_package: bool,
 
     /// Command to run
     #[clap(required_unless_present = "update", name = "cmd")]
