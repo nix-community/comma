@@ -1,7 +1,4 @@
 # ignore nix-build result folder
 result
-
-
-# Added by cargo
-
 /target
+.direnv
