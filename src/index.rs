@@ -37,5 +37,6 @@ fn is_database_old(database_file: std::path::PathBuf) -> bool {
         .elapsed()
         .unwrap_or(Duration::new(0, 0));
 
-    time_since_modified > Duration::from_secs(30 * 24 * 60 * 60) && !metadata.permissions().readonly()
+    time_since_modified > Duration::from_secs(30 * 24 * 60 * 60)
+        && !metadata.permissions().readonly()
 }
