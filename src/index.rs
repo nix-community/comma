@@ -16,10 +16,10 @@ pub fn check_database() {
     let cache_dir = base.get_cache_home();
     let database_file = cache_dir.join("files");
     if !database_file.exists() {
-        println!("Warning: Nix-index database does not exist, try updating with `--update`.");
+        println!("Warning: Nix-index database does not exist, try updating with `comma --update`.");
     } else if is_database_old(database_file) {
         println!(
-            "Warning: Nix-index database is older than 30 days, try updating with `--update`."
+            "Warning: Nix-index database is older than 30 days, try updating with `comma --update`."
         );
     }
 }
