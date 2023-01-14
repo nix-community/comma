@@ -70,7 +70,7 @@ fn main() -> ExitCode {
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
 
-    index::check_database();
+    index::check_database_updated();
 
     let nix_locate_output = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
@@ -79,6 +79,7 @@ fn main() -> ExitCode {
         .expect("failed to execute nix-locate");
 
     if !nix_locate_output.status.success() {
+        index::check_database_exists();
         match std::str::from_utf8(&nix_locate_output.stderr) {
             Ok(stderr) => eprintln!("nix-locate failed with: {}", stderr),
             Err(_) => eprint!("nix-locate failed"),
