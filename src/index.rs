@@ -38,7 +38,11 @@ fn get_database_file() -> PathBuf {
 
 /// Test whether the database is more than 30 days old
 fn is_database_old(database_file: std::path::PathBuf) -> bool {
-    let metadata = match database_file.metadata() {
+    let metadata = match if database_file.is_symlink() {
+        database_file.symlink_metadata()
+    } else {
+        database_file.metadata()
+    } {
         Ok(metadata) => metadata,
         Err(_) => return false,
     };
