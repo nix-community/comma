@@ -59,12 +59,13 @@ fn main() -> ExitCode {
     let args = Opt::parse();
 
     if args.update {
+        eprintln!("\"comma --update\" has been deprecated. use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
         index::update_database();
     }
 
     // The command may not be given if `--update` was specified.
     if args.cmd.is_empty() {
-        return ExitCode::SUCCESS;
+        return ExitCode::FAILURE;
     }
 
     let command = &args.cmd[0];
@@ -145,7 +146,7 @@ struct Opt {
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
-    /// Update nix-index database
+    /// DEPRECATED Update nix-index database
     #[clap(short, long)]
     update: bool,
 
