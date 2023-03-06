@@ -59,7 +59,7 @@ fn main() -> ExitCode {
     let args = Opt::parse();
 
     if args.update {
-        eprintln!("\"comma --update\" has been deprecated. use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
+        eprintln!("\"comma --update\" has been deprecated. either obtain a prebuilt databse from https://github.com/Mic92/nix-index-database or use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
         index::update_database();
     }
 

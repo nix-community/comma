@@ -15,7 +15,7 @@ pub fn update_database() {
 pub fn check_database_exists() {
     let database_file = get_database_file();
     if !database_file.exists() {
-        println!("Warning: Nix-index database does not exist, try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
+        println!("Warning: Nix-index database does not exist, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
     }
 }
 
@@ -24,7 +24,7 @@ pub fn check_database_updated() {
     let database_file = get_database_file();
     if is_database_old(database_file) {
         println!(
-            "Warning: Nix-index database is older than 30 days, try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
+            "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
         );
     }
 }
