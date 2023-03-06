@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "comma"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "clap",
  "xdg",
