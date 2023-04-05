@@ -50,7 +50,7 @@
           };
 
           devShells.default = with pkgs; mkShell {
-            nativeBuildInputs = [ cargo nix-index rustc rustfmt rustPackages.clippy fzy ];
+            nativeBuildInputs = [ cargo cargo-edit nix-index rustc rustfmt rustPackages.clippy fzy ];
             RUST_SRC_PATH = rustPlatform.rustLibSrc;
           };
         })
