@@ -114,7 +114,7 @@ fn main() -> ExitCode {
         Ok(val) => val,
         Err(_) => "".to_owned(),
     }
-    .contains("nixpkgs");
+    .contains("nixpkgs=");
 
     if args.print_package {
         println!(
