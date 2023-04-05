@@ -35,7 +35,7 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     )
 }
 
-fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String]) {
+fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String], nixpkgs_flake: &str) {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -47,7 +47,7 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String])
     if use_channel {
         run_cmd.args(["-f", "<nixpkgs>", choice]);
     } else {
-        run_cmd.args([format!("nixpkgs#{}", choice)]);
+        run_cmd.args([format!("{}#{}", nixpkgs_flake, choice)]);
     }
 
     run_cmd.args(["--command", command]);
@@ -129,7 +129,7 @@ fn main() -> ExitCode {
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
     } else {
-        run_command(use_channel, &choice, command, trail);
+        run_command(use_channel, &choice, command, trail, &args.nixpkgs_flake);
     }
 
     ExitCode::SUCCESS
@@ -145,6 +145,9 @@ struct Opt {
 
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
+
+    #[clap(long, env = "COMMA_NIXPKGS_FLAKE", default_value = "nixpkgs")]
+    nixpkgs_flake: String,
 
     /// DEPRECATED Update nix-index database
     #[clap(short, long)]
