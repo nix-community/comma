@@ -37,6 +37,26 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
   in [ comma ];
   ```
 
+
+- Flakes
+
+  Add
+
+  ```nix
+  inputs.comma = {
+    url = "github:nix-community/comma";
+  };
+  ```
+
+  to inputs
+
+  and
+
+  `inputs.comma.overlays.default` (or comma without `inputs.` if you use explicit input arguments)
+
+  to nixpkgs.overlays
+
+
 ## Usage
 
 ```bash
