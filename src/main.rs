@@ -35,7 +35,7 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     )
 }
 
-fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String], nixpkgs_flake: &str) {
+fn run_command_or_open_shell(use_channel: bool, choice: &str, command: &str, trail: &[String], nixpkgs_flake: &str) {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -50,8 +50,11 @@ fn run_command(use_channel: bool, choice: &str, command: &str, trail: &[String],
         run_cmd.args([format!("{}#{}", nixpkgs_flake, choice)]);
     }
 
-    run_cmd.args(["--command", command]);
-    run_cmd.args(trail);
+    if command != "" {
+        run_cmd.args(["--command", command]);
+        run_cmd.args(trail);
+    };
+
     run_cmd.exec();
 }
 
@@ -128,8 +131,10 @@ fn main() -> ExitCode {
         Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
+    } else if args.shell {
+        run_command_or_open_shell(use_channel, &choice, "", &[String::new()], &args.nixpkgs_flake);
     } else {
-        run_command(use_channel, &choice, command, trail, &args.nixpkgs_flake);
+        run_command_or_open_shell(use_channel, &choice, command, trail, &args.nixpkgs_flake);
     }
 
     ExitCode::SUCCESS
@@ -142,6 +147,10 @@ struct Opt {
     /// Install the derivation containing the executable
     #[clap(short, long)]
     install: bool,
+
+    /// Open a shell containing the derivation containing the executable
+    #[clap(short, long)]
+    shell: bool,
 
     #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
