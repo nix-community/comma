@@ -7,55 +7,19 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 
 ## Installation
 
-- Nix with [Flakes](https://nixos.wiki/wiki/Flakes):
+  comma is in nixpkgs so you can install it just like any other package.
+
+  either install it in your nix environment
 
   ```bash
-  $ nix profile install github:nix-community/comma
+    nix-env --install comma
   ```
 
-- No flakes:
-
-  ```bash
-  $ nix-env -i -f "https://github.com/nix-community/comma/archive/master.tar.gz"
-  ```
-
-## NixOS installation
-
-- No flakes:
-
-  replace "v1.2.0" with the latest version
+  or add this snippet to your NixOS configuration.
 
   ```nix
-  environment.systemPackages =
-  let
-    comma = (import (pkgs.fetchFromGitHub {
-      owner = "nix-community";
-      repo = "comma";
-      rev = "v1.2.0";
-      sha256 = "0000000000000000000000000000000000000000000000000000";
-    })).default;
-  in [ comma ];
+  environment.systemPackages = with pkgs; [ comma ];
   ```
-
-
-- Flakes
-
-  Add
-
-  ```nix
-  inputs.comma = {
-    url = "github:nix-community/comma";
-  };
-  ```
-
-  to inputs
-
-  and
-
-  `inputs.comma.overlays.default` (or comma without `inputs.` if you use explicit input arguments)
-
-  to nixpkgs.overlays
-
 
 ## Usage
 
