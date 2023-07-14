@@ -12,7 +12,7 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
   either install it in your nix environment
 
   ```bash
-    nix-env -f '<nixpkgs>' -iA comma
+  nix-env -f '<nixpkgs>' -iA comma
   ```
 
   or add this snippet to your NixOS configuration.
