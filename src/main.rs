@@ -10,7 +10,7 @@ use clap::crate_version;
 use clap::Parser;
 
 fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
-    let mut picker_process = Command::new(&picker)
+    let mut picker_process = Command::new(picker)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -50,7 +50,7 @@ fn run_command_or_open_shell(use_channel: bool, choice: &str, command: &str, tra
         run_cmd.args([format!("{}#{}", nixpkgs_flake, choice)]);
     }
 
-    if command != "" {
+    if !command.is_empty() {
         run_cmd.args(["--command", command]);
         run_cmd.args(trail);
     };
