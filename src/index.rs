@@ -7,7 +7,7 @@ use std::{
 
 /// Update the local nix-index database.
 pub fn update_database() {
-    println!("Updating nix-index database, takes around 5 minutes.");
+    eprintln!("Updating nix-index database, takes around 5 minutes.");
     Command::new("nix-index").exec();
 }
 
@@ -15,7 +15,7 @@ pub fn update_database() {
 pub fn check_database_exists() {
     let database_file = get_database_file();
     if !database_file.exists() {
-        println!("Warning: Nix-index database does not exist, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
+        eprintln!("Warning: Nix-index database does not exist, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
     }
 }
 
@@ -23,7 +23,7 @@ pub fn check_database_exists() {
 pub fn check_database_updated() {
     let database_file = get_database_file();
     if is_database_old(database_file) {
-        println!(
+        eprintln!(
             "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
         );
     }
