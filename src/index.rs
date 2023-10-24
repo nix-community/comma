@@ -22,7 +22,7 @@ pub fn check_database_exists() {
 /// Prints a warning if the nix-index database is out of date.
 pub fn check_database_updated() {
     let database_file = get_database_file();
-    if is_database_old(database_file) {
+    if is_database_old(&database_file) {
         eprintln!(
             "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
         );
@@ -37,10 +37,9 @@ fn get_database_file() -> PathBuf {
 }
 
 /// Test whether the database is more than 30 days old
-fn is_database_old(database_file: std::path::PathBuf) -> bool {
-    let metadata = match database_file.metadata() {
-        Ok(metadata) => metadata,
-        Err(_) => return false,
+fn is_database_old(database_file: &std::path::PathBuf) -> bool {
+    let Ok(metadata) = database_file.metadata() else {
+        return false;
     };
 
     let time_since_modified = metadata

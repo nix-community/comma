@@ -47,7 +47,7 @@ fn run_command_or_open_shell(use_channel: bool, choice: &str, command: &str, tra
     if use_channel {
         run_cmd.args(["-f", "<nixpkgs>", choice]);
     } else {
-        run_cmd.args([format!("{}#{}", nixpkgs_flake, choice)]);
+        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
     }
 
     if !command.is_empty() {
@@ -78,14 +78,14 @@ fn main() -> ExitCode {
 
     let nix_locate_output = Command::new("nix-locate")
         .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
-        .arg(format!("/bin/{}", command))
+        .arg(format!("/bin/{command}"))
         .output()
         .expect("failed to execute nix-locate");
 
     if !nix_locate_output.status.success() {
         index::check_database_exists();
         match std::str::from_utf8(&nix_locate_output.stderr) {
-            Ok(stderr) => eprintln!("nix-locate failed with: {}", stderr),
+            Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
             Err(_) => eprint!("nix-locate failed"),
         }
         return ExitCode::FAILURE;
@@ -94,7 +94,7 @@ fn main() -> ExitCode {
     let attrs = nix_locate_output.stdout;
 
     if attrs.is_empty() {
-        eprintln!("No executable `{}` found in nix-index database.", command);
+        eprintln!("No executable `{command}` found in nix-index database.");
         return ExitCode::FAILURE;
     }
 
@@ -115,7 +115,7 @@ fn main() -> ExitCode {
 
     let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
-        Err(_) => "".to_owned(),
+        Err(_) => String::new(),
     }
     .contains("nixpkgs=");
 
