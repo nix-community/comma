@@ -1,9 +1,10 @@
 mod index;
+mod shell;
 use std::{
     env,
     io::Write,
     os::unix::prelude::CommandExt,
-    process::{Command, ExitCode, Stdio},
+    process::{Command, ExitCode, Stdio, self},
 };
 
 use clap::crate_version;
@@ -52,7 +53,9 @@ fn run_command_or_open_shell(use_channel: bool, choice: &str, command: &str, tra
 
     if !command.is_empty() {
         run_cmd.args(["--command", command]);
-        run_cmd.args(trail);
+        if !trail.is_empty() {
+            run_cmd.args(trail);
+        }
     };
 
     run_cmd.exec();
@@ -132,7 +135,8 @@ fn main() -> ExitCode {
             .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
             .exec();
     } else if args.shell {
-        run_command_or_open_shell(use_channel, &choice, "", &[String::new()], &args.nixpkgs_flake);
+        let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
+        run_command_or_open_shell(use_channel, &choice, &shell_cmd, &[], &args.nixpkgs_flake);
     } else {
         run_command_or_open_shell(use_channel, &choice, command, trail, &args.nixpkgs_flake);
     }
