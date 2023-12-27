@@ -14,9 +14,6 @@ const KNOWN_SHELLS: &[&str] = &[
 ];
 
 fn get_process_status_field(pid: u32, field: &str) -> ResultDyn<String> {
-    if pid <= 0 {
-        return Err(format!("invalid pid: {pid}").into());
-    };
     let status_bytes =
         fs::read(format!("/proc/{pid:?}/status")).map_err(|_| format!("no such pid: {pid:?}"))?;
     let status_str = String::from_utf8(status_bytes)?;
@@ -26,18 +23,18 @@ fn get_process_status_field(pid: u32, field: &str) -> ResultDyn<String> {
         .ok_or_else(|| format!("error parsing /proc/{pid:?}/status"))?;
     let field_contents = status_str
         .strip_prefix(&format!("{field}:"))
-        .ok_or_else(|| format!("bad parsing"))?
+        .ok_or_else(|| "bad parsing".to_string())?
         .trim()
         .to_owned();
     Ok(field_contents)
 }
 
 fn get_parent_pid(pid: u32) -> ResultDyn<u32> {
-    Ok(get_process_status_field(pid, &"PPid")?.parse::<u32>()?)
+    Ok(get_process_status_field(pid, "PPid")?.parse::<u32>()?)
 }
 
 fn get_process_name(pid: u32) -> ResultDyn<String> {
-    Ok(get_process_status_field(pid, &"Name")?)
+    get_process_status_field(pid, "Name")
 }
 
 fn get_all_parents_pid(pid: u32) -> ResultDyn<Vec<u32>> {

@@ -1,6 +1,6 @@
 use std::{
     os::unix::prelude::CommandExt,
-    path::PathBuf,
+    path::{PathBuf, Path},
     process::Command,
     time::{Duration, SystemTime},
 };
@@ -37,7 +37,7 @@ fn get_database_file() -> PathBuf {
 }
 
 /// Test whether the database is more than 30 days old
-fn is_database_old(database_file: &std::path::PathBuf) -> bool {
+fn is_database_old(database_file: &Path) -> bool {
     let Ok(metadata) = database_file.metadata() else {
         return false;
     };
