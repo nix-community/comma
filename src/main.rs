@@ -4,7 +4,7 @@ use std::{
     env,
     io::Write,
     os::unix::prelude::CommandExt,
-    process::{Command, ExitCode, Stdio, self},
+    process::{self, Command, ExitCode, Stdio},
 };
 
 use clap::crate_version;
@@ -36,7 +36,13 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     )
 }
 
-fn run_command_or_open_shell(use_channel: bool, choice: &str, command: &str, trail: &[String], nixpkgs_flake: &str) {
+fn run_command_or_open_shell(
+    use_channel: bool,
+    choice: &str,
+    command: &str,
+    trail: &[String],
+    nixpkgs_flake: &str,
+) {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([

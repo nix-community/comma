@@ -1,6 +1,6 @@
 use std::{
     os::unix::prelude::CommandExt,
-    path::{PathBuf, Path},
+    path::{Path, PathBuf},
     process::Command,
     time::{Duration, SystemTime},
 };
