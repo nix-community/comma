@@ -32,6 +32,13 @@
               ln -s $out/bin/comma $out/bin/,
             '';
           };
+          checkInputs = [ pkgs.rustPackages.clippy ];
+          doCheck = true;
+          cargoTestCommands = x:
+            x ++ [
+              ''cargo clippy --all --all-features --tests -- \
+                -D warnings || true''
+            ];
         };
     in
     utils.lib.eachDefaultSystem
