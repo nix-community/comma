@@ -162,10 +162,10 @@ struct Opt {
     #[clap(short, long)]
     shell: bool,
 
-    #[clap(long, env = "COMMA_PICKER", default_value = "fzy")]
+    #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
-    #[clap(long, env = "COMMA_NIXPKGS_FLAKE", default_value = "nixpkgs")]
+    #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE", default_value = "nixpkgs")]
     nixpkgs_flake: String,
 
     /// DEPRECATED Update nix-index database
@@ -173,7 +173,7 @@ struct Opt {
     update: bool,
 
     /// Print the package containing the executable
-    #[clap(long = "print-package")]
+    #[clap(short = 'p', long = "print-package")]
     print_package: bool,
 
     /// Command to run
