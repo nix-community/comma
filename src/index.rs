@@ -1,8 +1,5 @@
 use std::{
-    os::unix::prelude::CommandExt,
-    path::{Path, PathBuf},
-    process::Command,
-    time::{Duration, SystemTime},
+    env, os::unix::prelude::CommandExt, path::{Path, PathBuf}, process::Command, time::{Duration, SystemTime}
 };
 
 /// Update the local nix-index database.
@@ -21,6 +18,12 @@ pub fn check_database_exists() {
 
 /// Prints a warning if the nix-index database is out of date.
 pub fn check_database_updated() {
+    if env::var("NIX_INDEX_DATABASE").is_ok() {
+        // If the user has set NIX_INDEX_DATABASE, they are responsible for keeping it up to date
+        // because if it's part of the nix store, the timestamp be always 1970-01-01.
+        // This environment variable is set by nix-index-database.
+        return;
+    }
     let database_file = get_database_file();
     if is_database_old(&database_file) {
         eprintln!(
