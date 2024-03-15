@@ -1,4 +1,5 @@
 use std::{
+    env,
     os::unix::prelude::CommandExt,
     path::{Path, PathBuf},
     process::Command,
@@ -12,28 +13,42 @@ pub fn update_database() {
 }
 
 /// Prints a warning if the nix-index database is non-existent
-pub fn check_database_exists() {
+pub fn check_database_exists() -> Result<(), ()> {
     let database_file = get_database_file();
     if !database_file.exists() {
         eprintln!("Warning: Nix-index database does not exist, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
+        return Err(())
     }
+    Ok(())
 }
 
 /// Prints a warning if the nix-index database is out of date.
 pub fn check_database_updated() {
     let database_file = get_database_file();
-    if is_database_old(&database_file) {
-        eprintln!(
-            "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
-        );
-    }
+    if check_database_exists().is_ok() {
+        if database_file.metadata().unwrap().permissions().readonly() {
+            // If db is not writable, they are responsible for keeping it up to date
+            // because if it's part of the nix store, the timestamp will always 1970-01-01.
+            return;
+        };
+        if is_database_old(&database_file) {
+            eprintln!(
+                "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
+            );
+        }
+    };
 }
 
 /// Get the location of the nix-index database file
 fn get_database_file() -> PathBuf {
-    let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-    let cache_dir = base.get_cache_home();
-    cache_dir.join("files")
+    match env::var("NIX_INDEX_DATABASE") {
+        Ok(db) => PathBuf::from(db),
+        Err(_) => {
+            let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
+            let cache_dir = base.get_cache_home();
+            cache_dir.join("files")
+        }
+    }
 }
 
 /// Test whether the database is more than 30 days old

@@ -92,7 +92,6 @@ fn main() -> ExitCode {
         .expect("failed to execute nix-locate");
 
     if !nix_locate_output.status.success() {
-        index::check_database_exists();
         match std::str::from_utf8(&nix_locate_output.stderr) {
             Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
             Err(_) => eprint!("nix-locate failed"),
@@ -165,7 +164,12 @@ struct Opt {
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
-    #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE", default_value = "nixpkgs")]
+    #[clap(
+        short = 'F',
+        long,
+        env = "COMMA_NIXPKGS_FLAKE",
+        default_value = "nixpkgs"
+    )]
     nixpkgs_flake: String,
 
     /// DEPRECATED Update nix-index database
