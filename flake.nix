@@ -24,9 +24,11 @@
         naersk-lib.buildPackage {
           pname = "comma";
           root = ./.;
-          nativeBuildInputs = with pkgs; [ makeWrapper ];
+          nativeBuildInputs = with pkgs; [ makeWrapper installShellFiles ];
           overrideMain = _: {
             postInstall = ''
+              installShellCompletion --zsh --name _comma contrib/zsh/_comma
+
               wrapProgram $out/bin/comma \
                 --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
               ln -s $out/bin/comma $out/bin/,

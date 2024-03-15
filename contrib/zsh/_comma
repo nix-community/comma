@@ -1,0 +1,22 @@
+#compdef comma ,
+
+local -a args
+
+args=(
+  # Comma options
+  '(- 1 *)'{-h,--help}'[display usage information]'
+  '(- 1 *)'{-V,--version}"[show program's version number and exit]"
+  '(-i --install)'{-i,--install}'[install the derivation containing the executable]'
+  '(-s --shell)'{-s,--shell}'[open a shell containing the derivation containing the executable]'
+  '--picker[which picker to use when selecting a derivation]:<PICKER> [fzy]: _command_names -e'
+  '--nixpkgs_flake[which nixpkgs flake to use when selecting a derivation]:<NIXPKGS_FLAKE> [nixpkgs]'
+  '--print-package[print the package containing the executable]'
+
+  # This is the magic which makes it complete command names and their arguments
+  '1:command: _command_names -e'
+  '*::arguments: _normal -p $service'
+)
+
+_arguments -s -S -A '-*' : $args
+
+# vim: ft=zsh sw=2 ts=2 et
