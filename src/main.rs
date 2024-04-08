@@ -152,7 +152,7 @@ fn main() -> ExitCode {
                 format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
             ],
             &args.nixpkgs_flake,
-        )
+        );
     } else {
         run_command_or_open_shell(use_channel, &choice, command, trail, &args.nixpkgs_flake);
     }
