@@ -142,6 +142,17 @@ fn main() -> ExitCode {
     } else if args.shell {
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
         run_command_or_open_shell(use_channel, &choice, &shell_cmd, &[], &args.nixpkgs_flake);
+    } else if args.print_path {
+        run_command_or_open_shell(
+            use_channel,
+            &choice,
+            "sh",
+            &[
+                String::from("-c"),
+                format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
+            ],
+            &args.nixpkgs_flake,
+        );
     } else {
         run_command_or_open_shell(use_channel, &choice, command, trail, &args.nixpkgs_flake);
     }
@@ -179,6 +190,10 @@ struct Opt {
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-package")]
     print_package: bool,
+
+    /// Print the absolute path to the executable in the nix store
+    #[clap(short = 'x', long = "print-path")]
+    print_path: bool,
 
     /// Command to run
     #[clap(required_unless_present = "update", name = "cmd")]
