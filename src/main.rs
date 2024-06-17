@@ -127,12 +127,15 @@ fn main() -> ExitCode {
     }
     .contains("nixpkgs=");
 
-    if args.print_package {
+    if args.print_package || args.print_package_exit {
         println!(
             "Package that contains executable /bin/{}: {}",
             command,
             &choice.rsplit('.').last().unwrap()
         );
+        if args.print_package_exit {
+            return ExitCode::SUCCESS
+        }
     };
 
     if args.install {
@@ -190,6 +193,10 @@ struct Opt {
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-package")]
     print_package: bool,
+
+    /// Print the package containing the executable
+    #[clap(long = "print-package-exit")]
+    print_package_exit: bool,
 
     /// Print the absolute path to the executable in the nix store
     #[clap(short = 'x', long = "print-path")]
