@@ -1,5 +1,7 @@
+mod cache;
 mod index;
 mod shell;
+
 use std::{
     env,
     io::Write,
@@ -7,6 +9,7 @@ use std::{
     process::{self, Command, ExitCode, Stdio},
 };
 
+use cache::Cache;
 use clap::crate_version;
 use clap::Parser;
 
@@ -34,6 +37,43 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
             .trim()
             .to_owned(),
     )
+}
+
+fn index_database(command: &str, picker: &str) -> Option<String> {
+    index::check_database_updated();
+
+    let nix_locate_output = Command::new("nix-locate")
+        .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
+        .arg(format!("/bin/{command}"))
+        .output()
+        .expect("failed to execute nix-locate");
+
+    if !nix_locate_output.status.success() {
+        match std::str::from_utf8(&nix_locate_output.stderr) {
+            Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
+            Err(_) => eprintln!("nix-locate failed"),
+        }
+        return None;
+    }
+
+    let attrs = nix_locate_output.stdout;
+
+    if attrs.is_empty() {
+        eprintln!("No executable `{command}` found in nix-index database.");
+        return None;
+    }
+
+    let attrs = std::str::from_utf8(&attrs)
+        .expect("fail")
+        .trim()
+        .split('\n')
+        .collect::<Box<[&str]>>();
+
+    if attrs.len() > 1 {
+        pick(picker, &attrs)
+    } else {
+        attrs.first().map(|s| s.trim().to_owned())
+    }
 }
 
 fn run_command_or_open_shell(
@@ -70,56 +110,50 @@ fn run_command_or_open_shell(
 fn main() -> ExitCode {
     let args = Opt::parse();
 
+    let mut cache = Cache::new();
+    if let Err(ref e) = cache {
+        eprintln!("failed to initialize cache, disabling related functionality: {e}");
+    }
+
     if args.update {
         eprintln!("\"comma --update\" has been deprecated. either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
         index::update_database();
     }
 
+    if let Some(ref delete_cache_opt) = args.delete_cache {
+        if let Ok(ref mut cache) = cache {
+            cache.delete(delete_cache_opt);
+        }
+    }
+
     // The command may not be given if `--update` was specified.
     if args.cmd.is_empty() {
-        return ExitCode::FAILURE;
+        return if args.update || args.delete_cache.is_some() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
     }
 
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
 
-    index::check_database_updated();
-
-    let nix_locate_output = Command::new("nix-locate")
-        .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
-        .arg(format!("/bin/{command}"))
-        .output()
-        .expect("failed to execute nix-locate");
-
-    if !nix_locate_output.status.success() {
-        match std::str::from_utf8(&nix_locate_output.stderr) {
-            Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
-            Err(_) => eprint!("nix-locate failed"),
-        }
-        return ExitCode::FAILURE;
-    }
-
-    let attrs = nix_locate_output.stdout;
-
-    if attrs.is_empty() {
-        eprintln!("No executable `{command}` found in nix-index database.");
-        return ExitCode::FAILURE;
-    }
-
-    let attrs: Vec<_> = std::str::from_utf8(&attrs)
-        .expect("fail")
-        .trim()
-        .split('\n')
-        .collect();
-
-    let choice = if attrs.len() > 1 {
-        match pick(&args.picker, &attrs) {
-            Some(x) => x,
-            None => return ExitCode::FAILURE,
-        }
-    } else {
-        attrs.first().unwrap().trim().to_owned()
+    let derivation = match cache {
+        Ok(mut cache) => cache.query(command).or_else(|| {
+            index_database(command, &args.picker).map(|derivation| {
+                cache.update(command, &derivation);
+                derivation
+            })
+        }),
+        Err(_) => index_database(command, &args.picker),
     };
+
+    let derivation = match derivation {
+        Some(d) => d,
+        None => return ExitCode::FAILURE,
+    };
+
+    let basename = derivation.rsplit('.').last().unwrap();
 
     let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
@@ -130,22 +164,27 @@ fn main() -> ExitCode {
     if args.print_package {
         println!(
             "Package that contains executable /bin/{}: {}",
-            command,
-            &choice.rsplit('.').last().unwrap()
+            command, basename
         );
     };
 
     if args.install {
         Command::new("nix-env")
-            .args(["-f", "<nixpkgs>", "-iA", choice.rsplit('.').last().unwrap()])
+            .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
     } else if args.shell {
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        run_command_or_open_shell(use_channel, &choice, &shell_cmd, &[], &args.nixpkgs_flake);
+        run_command_or_open_shell(
+            use_channel,
+            &derivation,
+            &shell_cmd,
+            &[],
+            &args.nixpkgs_flake,
+        );
     } else if args.print_path {
         run_command_or_open_shell(
             use_channel,
-            &choice,
+            &derivation,
             "sh",
             &[
                 String::from("-c"),
@@ -154,7 +193,13 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         );
     } else {
-        run_command_or_open_shell(use_channel, &choice, command, trail, &args.nixpkgs_flake);
+        run_command_or_open_shell(
+            use_channel,
+            &derivation,
+            command,
+            trail,
+            &args.nixpkgs_flake,
+        );
     }
 
     ExitCode::SUCCESS
@@ -195,7 +240,11 @@ struct Opt {
     #[clap(short = 'x', long = "print-path")]
     print_path: bool,
 
+    /// Delete a cache entry, or the entire cache if a value wasn't specified
+    #[clap(short = 'd', long = "delete-cache")]
+    delete_cache: Option<Option<String>>,
+
     /// Command to run
-    #[clap(required_unless_present = "update", name = "cmd")]
+    #[clap(required_unless_present_any = ["update", "delete_cache"], name = "cmd")]
     cmd: Vec<String>,
 }
