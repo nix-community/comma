@@ -120,15 +120,15 @@ fn main() -> ExitCode {
         index::update_database();
     }
 
-    if let Some(ref delete_cache_opt) = args.delete_cache {
+    if args.empty_cache {
         if let Ok(ref mut cache) = cache {
-            cache.delete(delete_cache_opt);
+            cache.empty();
         }
     }
 
     // The command may not be given if `--update` was specified.
     if args.cmd.is_empty() {
-        return if args.update || args.delete_cache.is_some() {
+        return if args.update || args.empty_cache {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE
@@ -137,6 +137,12 @@ fn main() -> ExitCode {
 
     let command = &args.cmd[0];
     let trail = &args.cmd[1..];
+
+    if args.delete_entry {
+        if let Ok(ref mut cache) = cache {
+            cache.delete(command);
+        }
+    }
 
     let derivation = match cache {
         Ok(mut cache) => cache.query(command).or_else(|| {
@@ -240,11 +246,16 @@ struct Opt {
     #[clap(short = 'x', long = "print-path")]
     print_path: bool,
 
-    /// Delete a cache entry, or the entire cache if a value wasn't specified
-    #[clap(short = 'd', long = "delete-cache")]
-    delete_cache: Option<Option<String>>,
+    /// Empty the cache
+    #[clap(short, long = "empty-cache")]
+    empty_cache: bool,
+
+    /// Overwrite the cache entry for the specified command. This is achieved by first deleting it
+    /// from the cache, then running comma as normal.
+    #[clap(short, long = "delete-entry")]
+    delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["update", "delete_cache"], name = "cmd")]
+    #[clap(required_unless_present_any = ["update", "empty_cache"], name = "cmd")]
     cmd: Vec<String>,
 }

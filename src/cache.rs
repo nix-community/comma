@@ -36,12 +36,13 @@ impl Cache {
         self.update = true;
     }
 
-    pub fn delete(&mut self, command: &Option<String>) {
-        if let Some(command) = command {
-            self.data.0.remove(command);
-        } else {
-            self.data.0.clear();
-        }
+    pub fn delete(&mut self, command: &str) {
+        self.data.0.remove(command);
+        self.update = true;
+    }
+
+    pub fn empty(&mut self) {
+        self.data.0.clear();
         self.update = true;
     }
 }
