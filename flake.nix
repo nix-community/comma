@@ -53,6 +53,11 @@
                     ])
                   }
                 ln -s $out/bin/comma $out/bin/,
+
+                mkdir -p $out/etc/profile.d
+                cp $src/src/command-not-found.sh $out/etc/profile.d
+                patchShebangs $out/etc/profile.d/command-not-found.sh
+                sed -i "s|comma \"\$@\"|$out\/bin\/comma \"\$@\"|" $out/etc/profile.d/command-not-found.sh
               '';
             };
             checkInputs = [ rustPackages.clippy ];
