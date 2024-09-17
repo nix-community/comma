@@ -42,7 +42,10 @@ pub fn check_database_updated() {
 /// Get the location of the nix-index database file
 fn get_database_file() -> PathBuf {
     match env::var("NIX_INDEX_DATABASE") {
-        Ok(db) => PathBuf::from(db),
+        Ok(db) => {
+            let path = PathBuf::from(db);
+            return if path.is_dir() { path.join("files") } else { path };
+        },
         Err(_) => {
             let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
             let cache_dir = base.get_cache_home();
