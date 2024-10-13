@@ -23,7 +23,7 @@
         in
         naersk-lib.buildPackage {
           pname = "comma";
-          root = builtins.path {
+          src = builtins.path {
             name = "comma-source";
             path = ./.;
           };
