@@ -23,10 +23,7 @@
         in
         naersk-lib.buildPackage {
           pname = "comma";
-          src = builtins.path {
-            name = "comma-source";
-            path = ./.;
-          };
+          src = self;
           nativeBuildInputs = with pkgs; [ makeWrapper ];
           overrideMain = _: {
             postInstall = ''
