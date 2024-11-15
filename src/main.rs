@@ -13,7 +13,7 @@ use cache::Cache;
 use clap::crate_version;
 use clap::Parser;
 
-fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
+fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -39,7 +39,7 @@ fn pick(picker: &str, derivations: &[&str]) -> Option<String> {
     )
 }
 
-fn index_database(command: &str, picker: &str) -> Option<String> {
+fn index_database(command: &str) -> Option<Box<[String]>> {
     index::check_database_updated();
 
     let nix_locate_output = Command::new("nix-locate")
@@ -63,11 +63,18 @@ fn index_database(command: &str, picker: &str) -> Option<String> {
         return None;
     }
 
-    let attrs = std::str::from_utf8(&attrs)
-        .expect("fail")
-        .trim()
-        .split('\n')
-        .collect::<Box<[&str]>>();
+    Some(
+        std::str::from_utf8(&attrs)
+            .expect("fail")
+            .trim()
+            .split('\n')
+            .map(|s| s.to_owned())
+            .collect(),
+    )
+}
+
+fn index_database_pick(command: &str, picker: &str) -> Option<String> {
+    let attrs = index_database(command)?;
 
     if attrs.len() > 1 {
         pick(picker, &attrs)
@@ -144,14 +151,32 @@ fn main() -> ExitCode {
         }
     }
 
+    if args.print_packages {
+        match index_database(command) {
+            Some(derivations) => {
+                println!(
+                    "Packages that contain /bin/{command}:\n{}",
+                    derivations
+                        .iter()
+                        .map(|a| format!("- {a}"))
+                        .collect::<Box<[String]>>()
+                        .join("\n")
+                );
+
+                return ExitCode::SUCCESS;
+            }
+            None => return ExitCode::FAILURE,
+        }
+    }
+
     let derivation = match cache {
         Ok(mut cache) => cache.query(command).or_else(|| {
-            index_database(command, &args.picker).map(|derivation| {
+            index_database_pick(command, &args.picker).map(|derivation| {
                 cache.update(command, &derivation);
                 derivation
             })
         }),
-        Err(_) => index_database(command, &args.picker),
+        Err(_) => index_database_pick(command, &args.picker),
     };
 
     let derivation = match derivation {
@@ -166,13 +191,6 @@ fn main() -> ExitCode {
         Err(_) => String::new(),
     }
     .contains("nixpkgs=");
-
-    if args.print_package {
-        println!(
-            "Package that contains executable /bin/{}: {}",
-            command, basename
-        );
-    };
 
     if args.install {
         Command::new("nix-env")
@@ -239,8 +257,8 @@ struct Opt {
     update: bool,
 
     /// Print the package containing the executable
-    #[clap(short = 'p', long = "print-package")]
-    print_package: bool,
+    #[clap(short = 'p', long = "print-packages")]
+    print_packages: bool,
 
     /// Print the absolute path to the executable in the nix store
     #[clap(short = 'x', long = "print-path")]
