@@ -89,7 +89,7 @@ fn run_command_or_open_shell(
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
-) {
+) -> ! {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -114,7 +114,8 @@ fn run_command_or_open_shell(
         }
     };
 
-    run_cmd.exec();
+    let error = run_cmd.exec();
+    panic!("Failed to exec: {error}");
 }
 
 fn main() -> ExitCode {
@@ -196,9 +197,10 @@ fn main() -> ExitCode {
     let basename = derivation.rsplit('.').last().unwrap();
 
     if args.install {
-        Command::new("nix-env")
+        let error = Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
+        panic!("Failed to exec nix-env: {error}");
     } else if args.print_path {
         run_command_or_open_shell(
             use_channel,
@@ -219,8 +221,6 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         );
     }
-
-    ExitCode::SUCCESS
 }
 
 fn open_shell(
@@ -251,7 +251,6 @@ fn open_shell(
         &[],
         nixpkgs_flake.as_str(),
     );
-    ExitCode::SUCCESS
 }
 
 /// Try to find and select a program from a command
