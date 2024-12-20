@@ -85,7 +85,7 @@ fn index_database_pick(command: &str, picker: &str) -> Option<String> {
 
 fn run_command_or_open_shell(
     use_channel: bool,
-    choice: &str,
+    derivations: &[String],
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
@@ -99,9 +99,12 @@ fn run_command_or_open_shell(
     ]);
 
     if use_channel {
-        run_cmd.args(["-f", "<nixpkgs>", choice]);
+        run_cmd.args(["-f", "<nixpkgs>"]);
+        run_cmd.args(derivations);
     } else {
-        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
+        for derivation in derivations {
+            run_cmd.args([format!("{nixpkgs_flake}#{derivation}")]);
+        }
     }
 
     if !command.is_empty() {
@@ -117,10 +120,11 @@ fn run_command_or_open_shell(
 fn main() -> ExitCode {
     let args = Opt::parse();
 
-    let mut cache = Cache::new();
-    if let Err(ref e) = cache {
-        eprintln!("failed to initialize cache, disabling related functionality: {e}");
-    }
+    let mut cache = Cache::new()
+        .map_err(|e| {
+            eprintln!("failed to initialize cache, disabling related functionality: {e}");
+        })
+        .ok();
 
     if args.update {
         eprintln!("\"comma --update\" has been deprecated. either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
@@ -128,9 +132,22 @@ fn main() -> ExitCode {
     }
 
     if args.empty_cache {
-        if let Ok(ref mut cache) = cache {
+        if let Some(ref mut cache) = cache {
             cache.empty();
         }
+    }
+
+    let use_channel = env::var("NIX_PATH").is_ok_and(|p| p.contains("nixpkgs="));
+
+    if !args.shell.is_empty() {
+        return open_shell(
+            args.shell,
+            args.delete_entry,
+            &args.picker,
+            cache,
+            use_channel,
+            args.nixpkgs_flake,
+        );
     }
 
     // The command may not be given if `--update` was specified.
@@ -146,7 +163,7 @@ fn main() -> ExitCode {
     let trail = &args.cmd[1..];
 
     if args.delete_entry {
-        if let Ok(ref mut cache) = cache {
+        if let Some(ref mut cache) = cache {
             cache.delete(command);
         }
     }
@@ -169,46 +186,23 @@ fn main() -> ExitCode {
         }
     }
 
-    let derivation = match cache {
-        Ok(mut cache) => cache.query(command).or_else(|| {
-            index_database_pick(command, &args.picker).map(|derivation| {
-                cache.update(command, &derivation);
-                derivation
-            })
-        }),
-        Err(_) => index_database_pick(command, &args.picker),
+    let Some(derivation) = find_program(command, &args.picker, cache.as_mut(), args.delete_entry)
+    else {
+        eprint!("Error");
+        return ExitCode::FAILURE;
     };
-
-    let derivation = match derivation {
-        Some(d) => d,
-        None => return ExitCode::FAILURE,
-    };
-
+    // Explicitly drop cache because exec doesn't call destructors
+    drop(cache);
     let basename = derivation.rsplit('.').last().unwrap();
-
-    let use_channel = match env::var("NIX_PATH") {
-        Ok(val) => val,
-        Err(_) => String::new(),
-    }
-    .contains("nixpkgs=");
 
     if args.install {
         Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
-    } else if args.shell {
-        let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        run_command_or_open_shell(
-            use_channel,
-            &derivation,
-            &shell_cmd,
-            &[],
-            &args.nixpkgs_flake,
-        );
     } else if args.print_path {
         run_command_or_open_shell(
             use_channel,
-            &derivation,
+            &[derivation],
             "sh",
             &[
                 String::from("-c"),
@@ -219,7 +213,7 @@ fn main() -> ExitCode {
     } else {
         run_command_or_open_shell(
             use_channel,
-            &derivation,
+            &[derivation],
             command,
             trail,
             &args.nixpkgs_flake,
@@ -227,6 +221,60 @@ fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+fn open_shell(
+    commands: Vec<String>,
+    empty_cache: bool,
+    picker: &str,
+    mut cache: Option<Cache>,
+    use_channel: bool,
+    nixpkgs_flake: String,
+) -> ExitCode {
+    let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
+    let mut programs = Vec::new();
+    for prog in commands {
+        let Some(derivation) = find_program(&prog, picker, cache.as_mut(), empty_cache) else {
+            eprint!("Couldn't find program for {prog}");
+            return ExitCode::FAILURE;
+        };
+        programs.push(derivation);
+    }
+
+    // Explicitly drop cache because exec doesn't call destructors
+    drop(cache);
+
+    run_command_or_open_shell(
+        use_channel,
+        &programs,
+        &shell_cmd,
+        &[],
+        nixpkgs_flake.as_str(),
+    );
+    ExitCode::SUCCESS
+}
+
+/// Try to find and select a program from a command
+fn find_program(
+    command: &str,
+    picker: &str,
+    cache: Option<&mut Cache>,
+    delete_entry: bool,
+) -> Option<String> {
+    cache.map_or_else(
+        || index_database_pick(command, picker),
+        |cache| {
+            if delete_entry {
+                cache.delete(command);
+            }
+            cache.query(command).or_else(|| {
+                index_database_pick(command, picker).map(|derivation| {
+                    cache.update(command, &derivation);
+                    derivation
+                })
+            })
+        },
+    )
 }
 
 /// Runs programs without installing them
@@ -237,9 +285,9 @@ struct Opt {
     #[clap(short, long)]
     install: bool,
 
-    /// Open a shell containing the derivation containing the executable
-    #[clap(short, long)]
-    shell: bool,
+    /// Open a shell with the derivations of the specified installables
+    #[clap(short, long, conflicts_with_all(["cmd", "install"]), num_args(1..), value_name("cmd"))]
+    shell: Vec<String>,
 
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
@@ -274,6 +322,6 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["update", "empty_cache"], name = "cmd")]
+    #[clap(required_unless_present_any = ["update", "empty_cache", "shell"], name = "cmd")]
     cmd: Vec<String>,
 }
