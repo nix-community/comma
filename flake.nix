@@ -2,10 +2,6 @@
   description = "runs programs without installing them";
 
   inputs = {
-    naersk = {
-      url = "github:nix-community/naersk/master";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     utils.url = "github:numtide/flake-utils";
     flake-compat = {
@@ -19,7 +15,6 @@
       self,
       nixpkgs,
       utils,
-      naersk,
       flake-compat,
     }:
     let
@@ -35,7 +30,7 @@
         packages = {
           default = self.packages."${system}".comma;
           comma = callPackage "${self}/pkgs/comma" {
-            inherit self naersk;
+            inherit self;
           };
         };
 
@@ -61,7 +56,7 @@
       overlays.default = (
         final: prev: {
           comma = prev.callPackage "${self}/pkgs/comma" {
-            inherit self naersk;
+            inherit self;
           };
         }
       );

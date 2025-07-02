@@ -1,5 +1,6 @@
 {
   lib,
+  rustPlatform,
   makeWrapper,
   callPackage,
   clippy,
@@ -8,34 +9,38 @@
   nix-index-unwrapped,
   # Flake inputs
   self,
-  naersk,
 }:
 
-let
-  naersk-lib = callPackage naersk { };
-in
-
-naersk-lib.buildPackage {
+rustPlatform.buildRustPackage (finalAttrs: {
   pname = "comma";
+  inherit ((lib.importTOML "${finalAttrs.src}/Cargo.toml").package) version;
   src = self;
 
-  nativeBuildInputs = [ makeWrapper ];
+  strictDeps = true;
 
-  overrideMain = _: {
-    postInstall = ''
-      wrapProgram $out/bin/comma \
-        --suffix PATH : ${
-          lib.makeBinPath ([
-            nix
-            fzy
-            nix-index-unwrapped
-          ])
-        }
-      ln -s $out/bin/comma $out/bin/,
-    '';
+  nativeBuildInputs = [ makeWrapper ];
+  buildInputs = [
+    nix
+    fzy
+    nix-index-unwrapped
+  ];
+  # TODO: This might not support cross-compiling
+  nativeCheckInputs = [ clippy ] ++ finalAttrs.buildInputs;
+
+  useFetchCargoVendor = true;
+  cargoLock = {
+    lockFile = "${finalAttrs.src}/Cargo.lock";
   };
 
-  doCheck = true;
-  checkInputs = [ clippy ];
-  cargoTestCommands = x: x ++ [ "cargo clippy --all --all-features --tests -- -D warnings || true" ];
-}
+  postCheck = ''
+    cargo clippy --all --all-features --tests -- -D warnings
+  '';
+
+  postInstall = ''
+    wrapProgram $out/bin/comma \
+      --suffix PATH : ${
+        lib.makeBinPath finalAttrs.buildInputs
+      }
+    ln -s $out/bin/comma $out/bin/,
+  '';
+})
