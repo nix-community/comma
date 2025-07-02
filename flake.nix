@@ -2,10 +2,6 @@
   description = "runs programs without installing them";
 
   inputs = {
-    naersk = {
-      url = "github:nix-community/naersk/master";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     utils.url = "github:numtide/flake-utils";
     flake-compat = {
@@ -14,56 +10,55 @@
     };
   };
 
-  outputs = { self, nixpkgs, utils, naersk, flake-compat }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      utils,
+      flake-compat,
+    }:
     let
       inherit (nixpkgs) lib;
-      commaLambda = pkgs:
-        let
-          naersk-lib = pkgs.callPackage naersk { };
-        in
-        naersk-lib.buildPackage {
-          pname = "comma";
-          src = self;
-          nativeBuildInputs = with pkgs; [ makeWrapper ];
-          overrideMain = _: {
-            postInstall = ''
-              wrapProgram $out/bin/comma \
-                --prefix PATH : ${lib.makeBinPath (with pkgs; [ nix fzy nix-index-unwrapped ])}
-              ln -s $out/bin/comma $out/bin/,
-            '';
-          };
-          checkInputs = [ pkgs.rustPackages.clippy ];
-          doCheck = true;
-          cargoTestCommands = x:
-            x ++ [
-              ''cargo clippy --all --all-features --tests -- \
-                -D warnings || true''
-            ];
-        };
     in
-    utils.lib.eachDefaultSystem
-      (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
-          packages = {
-            default = self.packages."${system}".comma;
-            comma = commaLambda pkgs;
+    utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+        inherit (pkgs) callPackage mkShell rustPlatform;
+      in
+      {
+        packages = {
+          default = self.packages."${system}".comma;
+          comma = callPackage "${self}/pkgs/comma" {
+            inherit self;
           };
+        };
 
-          apps.default = utils.lib.mkApp {
-            drv = self.packages."${system}".default;
-          };
+        apps.default = utils.lib.mkApp {
+          drv = self.packages."${system}".default;
+        };
 
-          devShells.default = with pkgs; mkShell {
-            nativeBuildInputs = [ cargo cargo-edit nix-index rustc rustfmt rustPackages.clippy fzy ];
-            RUST_SRC_PATH = rustPlatform.rustLibSrc;
-          };
-        })
+        devShells.default = mkShell {
+          nativeBuildInputs = with pkgs; [
+            cargo
+            cargo-edit
+            nix-index
+            rustc
+            rustfmt
+            clippy
+            fzy
+          ];
+          RUST_SRC_PATH = rustPlatform.rustLibSrc;
+        };
+      }
+    )
     // {
-      overlays.default = (final: prev: {
-        comma = commaLambda prev;
-      });
+      overlays.default = (
+        final: prev: {
+          comma = prev.callPackage "${self}/pkgs/comma" {
+            inherit self;
+          };
+        }
+      );
     };
 }

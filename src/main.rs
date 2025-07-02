@@ -6,7 +6,7 @@ use std::{
     env,
     io::Write,
     os::unix::prelude::CommandExt,
-    process::{self, Command, ExitCode, Stdio},
+    process::{id, Command, ExitCode, Stdio},
 };
 
 use cache::Cache;
@@ -111,7 +111,7 @@ fn run_command_or_open_shell(
         }
     };
 
-    run_cmd.exec();
+    let _ = run_cmd.exec();
 }
 
 fn main() -> ExitCode {
@@ -171,9 +171,8 @@ fn main() -> ExitCode {
 
     let derivation = match cache {
         Ok(mut cache) => cache.query(command).or_else(|| {
-            index_database_pick(command, &args.picker).map(|derivation| {
-                cache.update(command, &derivation);
-                derivation
+            index_database_pick(command, &args.picker).inspect(|derivation| {
+                cache.update(command, derivation);
             })
         }),
         Err(_) => index_database_pick(command, &args.picker),
@@ -184,20 +183,16 @@ fn main() -> ExitCode {
         None => return ExitCode::FAILURE,
     };
 
-    let basename = derivation.rsplit('.').last().unwrap();
+    let basename = derivation.rsplit('.').next_back().unwrap();
 
-    let use_channel = match env::var("NIX_PATH") {
-        Ok(val) => val,
-        Err(_) => String::new(),
-    }
-    .contains("nixpkgs=");
+    let use_channel = env::var("NIX_PATH").unwrap_or_default().contains("nixpkgs=");
 
     if args.install {
-        Command::new("nix-env")
+        let _ = Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
     } else if args.shell {
-        let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
+        let shell_cmd = shell::select_shell_from_pid(id()).unwrap_or("bash".into());
         run_command_or_open_shell(
             use_channel,
             &derivation,
