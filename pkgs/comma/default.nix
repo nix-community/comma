@@ -24,7 +24,7 @@ naersk-lib.buildPackage {
   overrideMain = _: {
     postInstall = ''
       wrapProgram $out/bin/comma \
-        --prefix PATH : ${
+        --suffix PATH : ${
           lib.makeBinPath ([
             nix
             fzy
