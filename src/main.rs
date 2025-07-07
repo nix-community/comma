@@ -121,8 +121,8 @@ fn get_command_path(
     choice: &str,
     command: &str,
     nixpkgs_flake: &str,
-) -> Command {
-    run_command_or_open_shell(
+) -> String {
+    let nix_process = run_command_or_open_shell(
         use_channel,
         choice,
         "sh",
@@ -132,52 +132,88 @@ fn get_command_path(
         ],
         nixpkgs_flake,
     )
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("failed to execute nix: {err}"));
+
+    let output = nix_process.wait_with_output().unwrap().stdout;
+
+    std::str::from_utf8(&output)
+        .unwrap_or_else(|err| panic!("nix outputted invalid UTF-8: {err}"))
+        .trim()
+        .to_owned()
+}
+
+fn get_command_path_from_cache(
+    cache: &mut Result<Cache, Box<dyn Error>>,
+    entry: CacheEntry,
+    use_channel: bool,
+    command: &str,
+    nixpkgs_flake: &str,
+) -> String {
+    match &entry.path {
+        // If we have the path in the cache and it is not garbage collected
+        // (so the path still exists), it should be safe to use it directly
+        Some(path) if Path::new(&path).exists() => {
+            path.to_string()
+        }
+        // Otherwise, we need to find the command path
+        _ => {
+            match cache {
+                Ok(ref mut cache) => {
+                    let path = get_command_path(
+                        use_channel,
+                        &entry.derivation,
+                        command,
+                        nixpkgs_flake,
+                    );
+                    let entry = CacheEntry {
+                        path: Some(path.clone()),
+                        ..entry
+                    };
+                    cache.update(command, entry);
+
+                    path
+                }
+
+                Err(_) => {
+                    get_command_path(
+                        use_channel,
+                        &entry.derivation,
+                        command,
+                        nixpkgs_flake,
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn run_command_from_cache(
     cache: &mut Result<Cache, Box<dyn Error>>,
+    entry: CacheEntry,
     use_channel: bool,
-    choice: &str,
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
 ) -> Command {
-    match cache {
-        Ok(ref mut cache) => {
-            let mut nix_cmd = get_command_path(
-                use_channel,
-                choice,
-                command,
-                nixpkgs_flake,
-            );
-            let output = nix_cmd.stdout(Stdio::piped()).output().expect("failed to run nix");
-            let path = String::from_utf8(output.stdout).expect("failed to decode UTF-8");
-            let entry = CacheEntry {
-                derivation: choice.to_string(),
-                path: Some(path.trim().to_string()),
-            };
-            cache.update(command, entry);
+    let path = get_command_path_from_cache(
+        cache,
+        entry,
+        use_channel,
+        command,
+        nixpkgs_flake,
+    );
 
-            let mut run_cmd = Command::new(path.trim());
-            // Need to set arg0 here to handle cases like busybox,
-            // where the behavior of the program depends in the arg0
-            run_cmd.arg0(command);
-            if !trail.is_empty() {
-                run_cmd.args(trail);
-            }
-
-            run_cmd
-        }
-        Err(_) => {
-            run_command_or_open_shell(
-                use_channel,
-                choice,
-                command,
-                trail,
-                nixpkgs_flake,
-            )
-        }
+    let mut run_cmd = Command::new(path);
+    // Need to set arg0 here to handle cases like busybox,
+    // where the behavior of the program depends in the arg0
+    run_cmd.arg0(command);
+    if !trail.is_empty() {
+        run_cmd.args(trail);
     }
+
+    run_cmd
 }
 
 fn main() -> ExitCode {
@@ -272,6 +308,7 @@ fn main() -> ExitCode {
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
     } else if args.shell {
+        // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
         run_command_or_open_shell(
             use_channel,
@@ -281,52 +318,27 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         ).exec();
     } else if args.print_path {
-        get_command_path(
+        let path = get_command_path_from_cache(
+            &mut cache,
+            entry,
             use_channel,
-            &entry.derivation,
             command,
             &args.nixpkgs_flake,
-        ).exec();
+        );
+        println!("{}", path);
     } else {
-        match entry.path {
-            Some(path) => {
-                if Path::new(&path).exists() {
-                    let mut run_cmd = Command::new(path);
-                    run_cmd.arg0(command);
-                    if !trail.is_empty() {
-                        run_cmd.args(trail);
-                    }
-                    run_cmd.exec();
-                } else {
-                    let mut run_cmd = run_command_from_cache(
-                        &mut cache,
-                        use_channel,
-                        &entry.derivation,
-                        command,
-                        trail,
-                        &args.nixpkgs_flake,
-                    );
-                    // Drop cache before calling exec() to make sure that
-                    // the cache file is written
-                    drop(cache);
-                    run_cmd.exec();
-                }
-            }
-            None => {
-                let mut run_cmd = run_command_from_cache(
-                    &mut cache,
-                    use_channel,
-                    &entry.derivation,
-                    command,
-                    trail,
-                    &args.nixpkgs_flake,
-                );
-                // Drop cache before calling exec() to make sure that
-                // the cache file is written
-                drop(cache);
-                run_cmd.exec();
-            }
-        }
+        let mut run_cmd = run_command_from_cache(
+            &mut cache,
+            entry,
+            use_channel,
+            command,
+            trail,
+            &args.nixpkgs_flake,
+        );
+        // Drop cache before calling exec() to make sure that
+        // the cache file is written
+        drop(cache);
+        run_cmd.exec();
     }
 
     ExitCode::SUCCESS
