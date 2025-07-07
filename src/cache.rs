@@ -19,7 +19,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let path = xdg::BaseDirectories::new()?.place_state_file("comma-choices")?;
+        let path = xdg::BaseDirectories::new()?.place_state_file("comma/choices")?;
 
         Ok(Self {
             data: if path.exists() {
