@@ -12,8 +12,9 @@ use std::{
 };
 
 use cache::{Cache,CacheEntry};
-use clap::crate_version;
 use clap::Parser;
+use clap::crate_version;
+use log::{debug,trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
@@ -113,6 +114,8 @@ fn run_command_or_open_shell(
         }
     };
 
+    trace!("run nix command arguments: {:?}", run_cmd);
+
     run_cmd
 }
 
@@ -155,6 +158,7 @@ fn get_command_path_from_cache(
         // If we have the path in the cache and it is not garbage collected
         // (so the path still exists), it should be safe to use it directly
         Some(path) if Path::new(&path).exists() => {
+            debug!("found path in cache for command '{command}': {path}");
             path.to_string()
         }
         // Otherwise, we need to find the command path
@@ -167,6 +171,8 @@ fn get_command_path_from_cache(
                         command,
                         nixpkgs_flake,
                     );
+                    debug!("found path from nix for command '{command}': {path}");
+
                     let entry = CacheEntry {
                         path: Some(path.clone()),
                         ..entry
@@ -177,12 +183,15 @@ fn get_command_path_from_cache(
                 }
 
                 Err(_) => {
-                    get_command_path(
+                    let path = get_command_path(
                         use_channel,
                         &entry.derivation,
                         command,
                         nixpkgs_flake,
-                    )
+                    );
+                    debug!("found path from nix for command '{command}': {path}");
+
+                    path
                 }
             }
         }
@@ -213,10 +222,14 @@ fn run_command_from_cache(
         run_cmd.args(trail);
     }
 
+    trace!("run command from cache arguments: {run_cmd:?}");
+
     run_cmd
 }
 
 fn main() -> ExitCode {
+    env_logger::init();
+
     let args = Opt::parse();
 
     let mut cache = Cache::new();
@@ -325,7 +338,7 @@ fn main() -> ExitCode {
             command,
             &args.nixpkgs_flake,
         );
-        println!("{}", path);
+        println!("{path}");
     } else {
         let mut run_cmd = run_command_from_cache(
             &mut cache,
@@ -335,6 +348,7 @@ fn main() -> ExitCode {
             trail,
             &args.nixpkgs_flake,
         );
+
         // Drop cache before calling exec() to make sure that
         // the cache file is written
         drop(cache);
