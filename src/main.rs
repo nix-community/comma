@@ -4,12 +4,14 @@ mod shell;
 
 use std::{
     env,
+    error::Error,
     io::Write,
     os::unix::prelude::CommandExt,
+    path::Path,
     process::{self, Command, ExitCode, Stdio},
 };
 
-use cache::Cache;
+use cache::{Cache,CacheEntry};
 use clap::crate_version;
 use clap::Parser;
 
@@ -89,7 +91,7 @@ fn run_command_or_open_shell(
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
-) {
+) -> Command {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -111,7 +113,71 @@ fn run_command_or_open_shell(
         }
     };
 
-    run_cmd.exec();
+    run_cmd
+}
+
+fn get_command_path(
+    use_channel: bool,
+    choice: &str,
+    command: &str,
+    nixpkgs_flake: &str,
+) -> Command {
+    run_command_or_open_shell(
+        use_channel,
+        choice,
+        "sh",
+        &[
+            String::from("-c"),
+            format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
+        ],
+        nixpkgs_flake,
+    )
+}
+
+fn run_command_from_cache(
+    cache: &mut Result<Cache, Box<dyn Error>>,
+    use_channel: bool,
+    choice: &str,
+    command: &str,
+    trail: &[String],
+    nixpkgs_flake: &str,
+) -> Command {
+    match cache {
+        Ok(ref mut cache) => {
+            let mut nix_cmd = get_command_path(
+                use_channel,
+                choice,
+                command,
+                nixpkgs_flake,
+            );
+            let output = nix_cmd.stdout(Stdio::piped()).output().expect("failed to run nix");
+            let path = String::from_utf8(output.stdout).expect("failed to decode UTF-8");
+            let entry = CacheEntry {
+                derivation: choice.to_string(),
+                path: Some(path.trim().to_string()),
+            };
+            cache.update(command, entry);
+
+            let mut run_cmd = Command::new(path.trim());
+            // Need to set arg0 here to handle cases like busybox,
+            // where the behavior of the program depends in the arg0
+            run_cmd.arg0(command);
+            if !trail.is_empty() {
+                run_cmd.args(trail);
+            }
+
+            run_cmd
+        }
+        Err(_) => {
+            run_command_or_open_shell(
+                use_channel,
+                choice,
+                command,
+                trail,
+                nixpkgs_flake,
+            )
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -169,22 +235,31 @@ fn main() -> ExitCode {
         }
     }
 
-    let derivation = match cache {
-        Ok(mut cache) => cache.query(command).or_else(|| {
+    let entry = match cache {
+        Ok(ref mut cache) => cache.query(command).or_else(|| {
             index_database_pick(command, &args.picker).map(|derivation| {
-                cache.update(command, &derivation);
-                derivation
+                let entry = CacheEntry {
+                    derivation,
+                    path: None,
+                };
+                cache.update(command, entry.clone());
+                entry
             })
         }),
-        Err(_) => index_database_pick(command, &args.picker),
+        Err(_) => index_database_pick(command, &args.picker).map(|derivation| {
+            CacheEntry {
+                derivation,
+                path: None,
+            }
+        }),
     };
 
-    let derivation = match derivation {
+    let entry = match entry {
         Some(d) => d,
         None => return ExitCode::FAILURE,
     };
 
-    let basename = derivation.rsplit('.').last().unwrap();
+    let basename = entry.derivation.rsplit('.').last().unwrap();
 
     let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
@@ -200,30 +275,58 @@ fn main() -> ExitCode {
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
         run_command_or_open_shell(
             use_channel,
-            &derivation,
+            &entry.derivation,
             &shell_cmd,
             &[],
             &args.nixpkgs_flake,
-        );
+        ).exec();
     } else if args.print_path {
-        run_command_or_open_shell(
+        get_command_path(
             use_channel,
-            &derivation,
-            "sh",
-            &[
-                String::from("-c"),
-                format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
-            ],
-            &args.nixpkgs_flake,
-        );
-    } else {
-        run_command_or_open_shell(
-            use_channel,
-            &derivation,
+            &entry.derivation,
             command,
-            trail,
             &args.nixpkgs_flake,
-        );
+        ).exec();
+    } else {
+        match entry.path {
+            Some(path) => {
+                if Path::new(&path).exists() {
+                    let mut run_cmd = Command::new(path);
+                    run_cmd.arg0(command);
+                    if !trail.is_empty() {
+                        run_cmd.args(trail);
+                    }
+                    run_cmd.exec();
+                } else {
+                    let mut run_cmd = run_command_from_cache(
+                        &mut cache,
+                        use_channel,
+                        &entry.derivation,
+                        command,
+                        trail,
+                        &args.nixpkgs_flake,
+                    );
+                    // Drop cache before calling exec() to make sure that
+                    // the cache file is written
+                    drop(cache);
+                    run_cmd.exec();
+                }
+            }
+            None => {
+                let mut run_cmd = run_command_from_cache(
+                    &mut cache,
+                    use_channel,
+                    &entry.derivation,
+                    command,
+                    trail,
+                    &args.nixpkgs_flake,
+                );
+                // Drop cache before calling exec() to make sure that
+                // the cache file is written
+                drop(cache);
+                run_cmd.exec();
+            }
+        }
     }
 
     ExitCode::SUCCESS

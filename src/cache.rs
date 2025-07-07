@@ -3,7 +3,13 @@ use std::{collections::HashMap, error::Error, fs, path::PathBuf};
 use bitcode::{Decode, Encode};
 
 #[derive(Encode, Decode)]
-struct CacheData(HashMap<String, String>);
+struct CacheData(HashMap<String, CacheEntry>);
+
+#[derive(Encode, Decode, Clone)]
+pub struct CacheEntry {
+    pub derivation: String,
+    pub path: Option<String>,
+}
 
 pub struct Cache {
     path: PathBuf,
@@ -27,12 +33,12 @@ impl Cache {
         })
     }
 
-    pub fn query(&self, command: &str) -> Option<String> {
+    pub fn query(&self, command: &str) -> Option<CacheEntry> {
         self.data.0.get(command).cloned()
     }
 
-    pub fn update(&mut self, command: &str, derivation: &str) {
-        self.data.0.insert(command.into(), derivation.into());
+    pub fn update(&mut self, command: &str, entry: CacheEntry) {
+        self.data.0.insert(command.into(), entry);
         self.update = true;
     }
 
