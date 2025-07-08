@@ -11,10 +11,10 @@ use std::{
     process::{self, Command, ExitCode, Stdio},
 };
 
-use cache::{Cache,CacheEntry};
-use clap::Parser;
+use cache::{Cache, CacheEntry};
 use clap::crate_version;
-use log::{debug,trace};
+use clap::Parser;
+use log::{debug, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
@@ -119,32 +119,39 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
-fn get_command_path(
-    use_channel: bool,
-    choice: &str,
-    command: &str,
-    nixpkgs_flake: &str,
-) -> String {
-    let nix_process = run_command_or_open_shell(
-        use_channel,
-        choice,
-        "sh",
-        &[
-            String::from("-c"),
-            format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
-        ],
-        nixpkgs_flake,
-    )
+fn get_command_path(use_channel: bool, choice: &str, command: &str, nixpkgs_flake: &str) -> String {
+    let mut run_cmd = Command::new("nix");
+
+    run_cmd.args([
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "build",
+        "--print-out-paths",
+        "--no-link",
+    ]);
+
+    if use_channel {
+        run_cmd.args(["-f", "<nixpkgs>", choice]);
+    } else {
+        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
+    }
+
+    let result = run_cmd
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|err| panic!("failed to execute nix: {err}"));
 
-    let output = nix_process.wait_with_output().unwrap().stdout;
-
-    std::str::from_utf8(&output)
+    // It is safe to assume that only one path will be printed because
+    // nix-locate appends the output to the derivation name
+    // (e.g., firefox.out instead of firefox)
+    let output = result.wait_with_output().unwrap().stdout;
+    let base_path = std::str::from_utf8(&output)
         .unwrap_or_else(|err| panic!("nix outputted invalid UTF-8: {err}"))
-        .trim()
-        .to_owned()
+        .trim();
+
+    // It is safe to assume that command is in $out/bin/{command} from
+    // the derivation, since this was already filtered by nix-locate
+    format!("{base_path}/bin/{command}")
 }
 
 fn get_command_path_from_cache(
@@ -215,9 +222,6 @@ fn run_command_from_cache(
     );
 
     let mut run_cmd = Command::new(path);
-    // Need to set arg0 here to handle cases like busybox,
-    // where the behavior of the program depends in the arg0
-    run_cmd.arg0(command);
     if !trail.is_empty() {
         run_cmd.args(trail);
     }
