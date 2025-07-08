@@ -149,7 +149,7 @@ fn get_command_path(
 
 fn get_command_path_from_cache(
     cache: &mut Result<Cache, Box<dyn Error>>,
-    entry: CacheEntry,
+    entry: &CacheEntry,
     use_channel: bool,
     command: &str,
     nixpkgs_flake: &str,
@@ -159,7 +159,7 @@ fn get_command_path_from_cache(
         // (so the path still exists), it should be safe to use it directly
         Some(path) if Path::new(&path).exists() => {
             debug!("found path in cache for command '{command}': {path}");
-            path.to_string()
+            path.to_owned()
         }
         // Otherwise, we need to find the command path
         _ => {
@@ -175,7 +175,7 @@ fn get_command_path_from_cache(
 
                     let entry = CacheEntry {
                         path: Some(path.clone()),
-                        ..entry
+                        ..entry.clone()
                     };
                     cache.update(command, entry);
 
@@ -200,7 +200,7 @@ fn get_command_path_from_cache(
 
 fn run_command_from_cache(
     cache: &mut Result<Cache, Box<dyn Error>>,
-    entry: CacheEntry,
+    entry: &CacheEntry,
     use_channel: bool,
     command: &str,
     trail: &[String],
@@ -333,7 +333,7 @@ fn main() -> ExitCode {
     } else if args.print_path {
         let path = get_command_path_from_cache(
             &mut cache,
-            entry,
+            &entry,
             use_channel,
             command,
             &args.nixpkgs_flake,
@@ -342,7 +342,7 @@ fn main() -> ExitCode {
     } else {
         let mut run_cmd = run_command_from_cache(
             &mut cache,
-            entry,
+            &entry,
             use_channel,
             command,
             trail,
