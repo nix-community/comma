@@ -169,39 +169,27 @@ fn get_command_path_from_cache(
             path.to_owned()
         }
         // Otherwise, we need to find the command path
-        _ => {
-            match cache {
-                Ok(ref mut cache) => {
-                    let path = get_command_path(
-                        use_channel,
-                        &entry.derivation,
-                        command,
-                        nixpkgs_flake,
-                    );
-                    debug!("found path from nix for command '{command}': {path}");
+        _ => match cache {
+            Ok(ref mut cache) => {
+                let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
+                debug!("found path from nix for command '{command}': {path}");
 
-                    let entry = CacheEntry {
-                        path: Some(path.clone()),
-                        ..entry.clone()
-                    };
-                    cache.update(command, entry);
+                let entry = CacheEntry {
+                    path: Some(path.clone()),
+                    ..entry.clone()
+                };
+                cache.update(command, entry);
 
-                    path
-                }
-
-                Err(_) => {
-                    let path = get_command_path(
-                        use_channel,
-                        &entry.derivation,
-                        command,
-                        nixpkgs_flake,
-                    );
-                    debug!("found path from nix for command '{command}': {path}");
-
-                    path
-                }
+                path
             }
-        }
+
+            Err(_) => {
+                let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
+                debug!("found path from nix for command '{command}': {path}");
+
+                path
+            }
+        },
     }
 }
 
@@ -213,13 +201,7 @@ fn run_command_from_cache(
     trail: &[String],
     nixpkgs_flake: &str,
 ) -> Command {
-    let path = get_command_path_from_cache(
-        cache,
-        entry,
-        use_channel,
-        command,
-        nixpkgs_flake,
-    );
+    let path = get_command_path_from_cache(cache, entry, use_channel, command, nixpkgs_flake);
 
     let mut run_cmd = Command::new(path);
     if !trail.is_empty() {
@@ -293,11 +275,9 @@ fn main() -> ExitCode {
                 entry
             })
         }),
-        Err(_) => index_database_pick(command, &args.picker).map(|derivation| {
-            CacheEntry {
-                derivation,
-                path: None,
-            }
+        Err(_) => index_database_pick(command, &args.picker).map(|derivation| CacheEntry {
+            derivation,
+            path: None,
         }),
     };
 
@@ -308,8 +288,9 @@ fn main() -> ExitCode {
 
     let basename = entry.derivation.rsplit('.').next_back().unwrap();
 
-    let use_channel = env::var("NIX_PATH").unwrap_or_default()
-    .contains("nixpkgs=");
+    let use_channel = env::var("NIX_PATH")
+        .unwrap_or_default()
+        .contains("nixpkgs=");
 
     if args.install {
         let _ = Command::new("nix-env")
@@ -324,7 +305,8 @@ fn main() -> ExitCode {
             &shell_cmd,
             &[],
             &args.nixpkgs_flake,
-        ).exec();
+        )
+        .exec();
     } else if args.print_path {
         let path = get_command_path_from_cache(
             &mut cache,

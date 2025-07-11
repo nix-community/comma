@@ -4,7 +4,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-
 /// Prints a warning if the nix-index database is non-existent
 pub fn check_database_exists() -> Result<(), ()> {
     let database_file = get_database_file();
@@ -37,8 +36,12 @@ fn get_database_file() -> PathBuf {
     match env::var("NIX_INDEX_DATABASE") {
         Ok(db) => {
             let path = PathBuf::from(db);
-            if path.is_dir() { path.join("files") } else { path }
-        },
+            if path.is_dir() {
+                path.join("files")
+            } else {
+                path
+            }
+        }
         Err(_) => {
             let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
             let cache_dir = base.get_cache_home();
