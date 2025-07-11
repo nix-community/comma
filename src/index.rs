@@ -1,16 +1,9 @@
 use std::{
     env,
-    os::unix::prelude::CommandExt,
     path::{Path, PathBuf},
-    process::Command,
     time::{Duration, SystemTime},
 };
 
-/// Update the local nix-index database.
-pub fn update_database() {
-    eprintln!("Updating nix-index database, takes around 5 minutes.");
-    let _ = Command::new("nix-index").exec();
-}
 
 /// Prints a warning if the nix-index database is non-existent
 pub fn check_database_exists() -> Result<(), ()> {

@@ -241,20 +241,14 @@ fn main() -> ExitCode {
         eprintln!("failed to initialize cache, disabling related functionality: {e}");
     }
 
-    if args.update {
-        eprintln!("\"comma --update\" has been deprecated. either obtain a prebuilt database from https://github.com/Mic92/nix-index-database or use \"nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'\"");
-        index::update_database();
-    }
-
     if args.empty_cache {
         if let Ok(ref mut cache) = cache {
             cache.empty();
         }
     }
 
-    // The command may not be given if `--update` was specified.
     if args.cmd.is_empty() {
-        return if args.update || args.empty_cache {
+        return if args.empty_cache {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE
@@ -381,10 +375,6 @@ struct Opt {
         default_value = "nixpkgs"
     )]
     nixpkgs_flake: String,
-
-    /// DEPRECATED Update nix-index database
-    #[clap(short, long)]
-    update: bool,
 
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-packages")]
