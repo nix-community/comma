@@ -312,12 +312,9 @@ fn main() -> ExitCode {
         None => return ExitCode::FAILURE,
     };
 
-    let basename = entry.derivation.rsplit('.').last().unwrap();
+    let basename = entry.derivation.rsplit('.').next_back().unwrap();
 
-    let use_channel = match env::var("NIX_PATH") {
-        Ok(val) => val,
-        Err(_) => String::new(),
-    }
+    let use_channel = env::var("NIX_PATH").unwrap_or_default()
     .contains("nixpkgs=");
 
     if args.install {
