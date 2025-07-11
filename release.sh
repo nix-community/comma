@@ -22,5 +22,5 @@ cargo build
 # Commit and tag the update
 git add Cargo.toml Cargo.lock
 git commit -m "v${NEWVERSION}"
-git push origin $(git branch --show-current)
-gh release create v${NEWVERSION} -t v${NEWVERSION} --target $(git branch --show-current) --generate-notes
+git push origin "$(git branch --show-current)"
+gh release create "v${NEWVERSION}" -t "v${NEWVERSION}" --target "$(git branch --show-current)" --generate-notes
