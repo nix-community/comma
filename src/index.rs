@@ -44,7 +44,7 @@ fn get_database_file() -> PathBuf {
     match env::var("NIX_INDEX_DATABASE") {
         Ok(db) => {
             let path = PathBuf::from(db);
-            return if path.is_dir() { path.join("files") } else { path };
+            if path.is_dir() { path.join("files") } else { path }
         },
         Err(_) => {
             let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();

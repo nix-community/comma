@@ -4,14 +4,17 @@ mod shell;
 
 use std::{
     env,
+    error::Error,
     io::Write,
     os::unix::prelude::CommandExt,
+    path::Path,
     process::{self, Command, ExitCode, Stdio},
 };
 
-use cache::Cache;
+use cache::{Cache, CacheEntry};
 use clap::crate_version;
 use clap::Parser;
+use log::{debug, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
@@ -89,7 +92,7 @@ fn run_command_or_open_shell(
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
-) {
+) -> Command {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -111,10 +114,126 @@ fn run_command_or_open_shell(
         }
     };
 
-    run_cmd.exec();
+    trace!("run nix command arguments: {:?}", run_cmd);
+
+    run_cmd
+}
+
+fn get_command_path(use_channel: bool, choice: &str, command: &str, nixpkgs_flake: &str) -> String {
+    let mut run_cmd = Command::new("nix");
+
+    run_cmd.args([
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "build",
+        "--print-out-paths",
+        "--no-link",
+    ]);
+
+    if use_channel {
+        run_cmd.args(["-f", "<nixpkgs>", choice]);
+    } else {
+        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
+    }
+
+    let result = run_cmd
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("failed to execute nix: {err}"));
+
+    // It is safe to assume that only one path will be printed because
+    // nix-locate appends the output to the derivation name
+    // (e.g., firefox.out instead of firefox)
+    let output = result.wait_with_output().unwrap().stdout;
+    let base_path = std::str::from_utf8(&output)
+        .unwrap_or_else(|err| panic!("nix outputted invalid UTF-8: {err}"))
+        .trim();
+
+    // It is safe to assume that command is in $out/bin/{command} from
+    // the derivation, since this was already filtered by nix-locate
+    format!("{base_path}/bin/{command}")
+}
+
+fn get_command_path_from_cache(
+    cache: &mut Result<Cache, Box<dyn Error>>,
+    entry: &CacheEntry,
+    use_channel: bool,
+    command: &str,
+    nixpkgs_flake: &str,
+) -> String {
+    match &entry.path {
+        // If we have the path in the cache and it is not garbage collected
+        // (so the path still exists), it should be safe to use it directly
+        Some(path) if Path::new(&path).exists() => {
+            debug!("found path in cache for command '{command}': {path}");
+            path.to_owned()
+        }
+        // Otherwise, we need to find the command path
+        _ => {
+            match cache {
+                Ok(ref mut cache) => {
+                    let path = get_command_path(
+                        use_channel,
+                        &entry.derivation,
+                        command,
+                        nixpkgs_flake,
+                    );
+                    debug!("found path from nix for command '{command}': {path}");
+
+                    let entry = CacheEntry {
+                        path: Some(path.clone()),
+                        ..entry.clone()
+                    };
+                    cache.update(command, entry);
+
+                    path
+                }
+
+                Err(_) => {
+                    let path = get_command_path(
+                        use_channel,
+                        &entry.derivation,
+                        command,
+                        nixpkgs_flake,
+                    );
+                    debug!("found path from nix for command '{command}': {path}");
+
+                    path
+                }
+            }
+        }
+    }
+}
+
+fn run_command_from_cache(
+    cache: &mut Result<Cache, Box<dyn Error>>,
+    entry: &CacheEntry,
+    use_channel: bool,
+    command: &str,
+    trail: &[String],
+    nixpkgs_flake: &str,
+) -> Command {
+    let path = get_command_path_from_cache(
+        cache,
+        entry,
+        use_channel,
+        command,
+        nixpkgs_flake,
+    );
+
+    let mut run_cmd = Command::new(path);
+    if !trail.is_empty() {
+        run_cmd.args(trail);
+    }
+
+    trace!("run command from cache arguments: {run_cmd:?}");
+
+    run_cmd
 }
 
 fn main() -> ExitCode {
+    env_logger::init();
+
     let args = Opt::parse();
 
     let mut cache = Cache::new();
@@ -169,22 +288,31 @@ fn main() -> ExitCode {
         }
     }
 
-    let derivation = match cache {
-        Ok(mut cache) => cache.query(command).or_else(|| {
+    let entry = match cache {
+        Ok(ref mut cache) => cache.query(command).or_else(|| {
             index_database_pick(command, &args.picker).map(|derivation| {
-                cache.update(command, &derivation);
-                derivation
+                let entry = CacheEntry {
+                    derivation,
+                    path: None,
+                };
+                cache.update(command, entry.clone());
+                entry
             })
         }),
-        Err(_) => index_database_pick(command, &args.picker),
+        Err(_) => index_database_pick(command, &args.picker).map(|derivation| {
+            CacheEntry {
+                derivation,
+                path: None,
+            }
+        }),
     };
 
-    let derivation = match derivation {
+    let entry = match entry {
         Some(d) => d,
         None => return ExitCode::FAILURE,
     };
 
-    let basename = derivation.rsplit('.').last().unwrap();
+    let basename = entry.derivation.rsplit('.').last().unwrap();
 
     let use_channel = match env::var("NIX_PATH") {
         Ok(val) => val,
@@ -197,33 +325,38 @@ fn main() -> ExitCode {
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
     } else if args.shell {
+        // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
         run_command_or_open_shell(
             use_channel,
-            &derivation,
+            &entry.derivation,
             &shell_cmd,
             &[],
             &args.nixpkgs_flake,
-        );
+        ).exec();
     } else if args.print_path {
-        run_command_or_open_shell(
+        let path = get_command_path_from_cache(
+            &mut cache,
+            &entry,
             use_channel,
-            &derivation,
-            "sh",
-            &[
-                String::from("-c"),
-                format!("printf '%s\n' \"$(realpath \"$(which {command})\")\""),
-            ],
+            command,
             &args.nixpkgs_flake,
         );
+        println!("{path}");
     } else {
-        run_command_or_open_shell(
+        let mut run_cmd = run_command_from_cache(
+            &mut cache,
+            &entry,
             use_channel,
-            &derivation,
             command,
             trail,
             &args.nixpkgs_flake,
         );
+
+        // Drop cache before calling exec() to make sure that
+        // the cache file is written
+        drop(cache);
+        run_cmd.exec();
     }
 
     ExitCode::SUCCESS
