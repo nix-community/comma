@@ -9,7 +9,7 @@ use std::{
 /// Update the local nix-index database.
 pub fn update_database() {
     eprintln!("Updating nix-index database, takes around 5 minutes.");
-    Command::new("nix-index").exec();
+    let _ = Command::new("nix-index").exec();
 }
 
 /// Prints a warning if the nix-index database is non-existent

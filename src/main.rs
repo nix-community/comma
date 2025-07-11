@@ -318,13 +318,13 @@ fn main() -> ExitCode {
     .contains("nixpkgs=");
 
     if args.install {
-        Command::new("nix-env")
+        let _ = Command::new("nix-env")
             .args(["-f", "<nixpkgs>", "-iA", basename])
             .exec();
     } else if args.shell {
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        run_command_or_open_shell(
+        let _ = run_command_or_open_shell(
             use_channel,
             &entry.derivation,
             &shell_cmd,
@@ -353,7 +353,7 @@ fn main() -> ExitCode {
         // Drop cache before calling exec() to make sure that
         // the cache file is written
         drop(cache);
-        run_cmd.exec();
+        let _ = run_cmd.exec();
     }
 
     ExitCode::SUCCESS
