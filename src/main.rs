@@ -4,7 +4,6 @@ mod shell;
 
 use std::{
     env,
-    error::Error,
     io::Write,
     os::unix::prelude::CommandExt,
     path::Path,
@@ -155,7 +154,7 @@ fn get_command_path(use_channel: bool, choice: &str, command: &str, nixpkgs_flak
 }
 
 fn get_command_path_from_cache(
-    cache: &mut Result<Cache, Box<dyn Error>>,
+    cache: &mut Option<Cache>,
     entry: &CacheEntry,
     use_channel: bool,
     command: &str,
@@ -165,12 +164,12 @@ fn get_command_path_from_cache(
         // If we have the path in the cache and it is not garbage collected
         // (so the path still exists), it should be safe to use it directly
         Some(path) if Path::new(&path).exists() => {
-            debug!("found path in cache for command '{command}': {path}");
+            debug!("found path from cache for command '{command}': {path}");
             path.to_owned()
         }
         // Otherwise, we need to find the command path
         _ => match cache {
-            Ok(ref mut cache) => {
+            Some(ref mut cache) => {
                 let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
                 debug!("found path from nix for command '{command}': {path}");
 
@@ -183,7 +182,7 @@ fn get_command_path_from_cache(
                 path
             }
 
-            Err(_) => {
+            None => {
                 let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
                 debug!("found path from nix for command '{command}': {path}");
 
@@ -194,7 +193,7 @@ fn get_command_path_from_cache(
 }
 
 fn run_command_from_cache(
-    cache: &mut Result<Cache, Box<dyn Error>>,
+    cache: &mut Option<Cache>,
     entry: &CacheEntry,
     use_channel: bool,
     command: &str,
@@ -218,13 +217,20 @@ fn main() -> ExitCode {
 
     let args = Opt::parse();
 
-    let mut cache = Cache::new();
-    if let Err(ref e) = cache {
-        eprintln!("failed to initialize cache, disabling related functionality: {e}");
-    }
+    let mut cache = if args.cache_level == 0 {
+        None
+    } else {
+        match Cache::new() {
+            Err(e) => {
+                eprintln!("failed to initialize cache, disabling related functionality: {e}");
+                None
+            }
+            Ok(x) => Some(x),
+        }
+    };
 
     if args.empty_cache {
-        if let Ok(ref mut cache) = cache {
+        if let Some(ref mut cache) = cache {
             cache.empty();
         }
     }
@@ -241,7 +247,7 @@ fn main() -> ExitCode {
     let trail = &args.cmd[1..];
 
     if args.delete_entry {
-        if let Ok(ref mut cache) = cache {
+        if let Some(ref mut cache) = cache {
             cache.delete(command);
         }
     }
@@ -265,7 +271,7 @@ fn main() -> ExitCode {
     }
 
     let entry = match cache {
-        Ok(ref mut cache) => cache.query(command).or_else(|| {
+        Some(ref mut cache) => cache.query(command).or_else(|| {
             index_database_pick(command, &args.picker).map(|derivation| {
                 let entry = CacheEntry {
                     derivation,
@@ -275,14 +281,21 @@ fn main() -> ExitCode {
                 entry
             })
         }),
-        Err(_) => index_database_pick(command, &args.picker).map(|derivation| CacheEntry {
+        None => index_database_pick(command, &args.picker).map(|derivation| CacheEntry {
             derivation,
             path: None,
         }),
     };
 
     let entry = match entry {
-        Some(d) => d,
+        Some(d) if args.cache_level >= 2 => d,
+        Some(d) => {
+            debug!("cache_level={}, ignoring path from cache", args.cache_level);
+            CacheEntry {
+                derivation: d.derivation.clone(),
+                path: None,
+            }
+        }
         None => return ExitCode::FAILURE,
     };
 
@@ -347,9 +360,11 @@ struct Opt {
     #[clap(short, long)]
     shell: bool,
 
+    /// Picker to use
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
+    /// Nixpkgs flake to use
     #[clap(
         short = 'F',
         long,
@@ -366,12 +381,17 @@ struct Opt {
     #[clap(short = 'x', long = "print-path")]
     print_path: bool,
 
+    /// Configure the cache level. 0 disables the cache, 1 enables cache for
+    /// choices, 2 also caches path evaluations
+    #[clap(long = "cache-level", env = "COMMA_CACHING", default_value_t = 2)]
+    cache_level: u8,
+
     /// Empty the cache
     #[clap(short, long = "empty-cache")]
     empty_cache: bool,
 
-    /// Overwrite the cache entry for the specified command. This is achieved by first deleting it
-    /// from the cache, then running comma as normal.
+    /// Overwrite the cache entry for the specified command. This is achieved
+    /// by first deleting it from the cache, then running comma as normal
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
