@@ -347,9 +347,11 @@ struct Opt {
     #[clap(short, long)]
     shell: bool,
 
+    /// Picker to use
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
+    /// Nixpkgs flake to use
     #[clap(
         short = 'F',
         long,
@@ -370,8 +372,8 @@ struct Opt {
     #[clap(short, long = "empty-cache")]
     empty_cache: bool,
 
-    /// Overwrite the cache entry for the specified command. This is achieved by first deleting it
-    /// from the cache, then running comma as normal.
+    /// Overwrite the cache entry for the specified command. This is achieved
+    /// by first deleting it from the cache, then running comma as normal
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
