@@ -20,9 +20,9 @@ pub struct Cache {
 
 impl Cache {
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        debug!("creating new cache instance");
-
         let path = xdg::BaseDirectories::new()?.place_state_file("comma/choices")?;
+
+        debug!("creating new cache instance for path: {}", path.display());
 
         Ok(Self {
             data: if path.exists() {
