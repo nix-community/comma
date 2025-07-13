@@ -26,40 +26,47 @@
       inherit (nixpkgs) lib;
       commaLambda =
         pkgs:
-        let
-          naersk-lib = pkgs.callPackage naersk { };
-        in
-        naersk-lib.buildPackage {
-          pname = "comma";
-          src = self;
-          nativeBuildInputs = with pkgs; [ makeWrapper ];
-          overrideMain = _: {
-            postInstall = ''
-              wrapProgram $out/bin/comma \
-                --prefix PATH : ${
-                  lib.makeBinPath (
-                    with pkgs;
-                    [
+        pkgs.callPackage (
+          {
+            callPackage,
+            makeWrapper,
+            nix,
+            fzy,
+            nix-index-unwrapped,
+            rustPackages,
+          }:
+          let
+            naersk-lib = callPackage naersk { };
+          in
+          naersk-lib.buildPackage {
+            pname = "comma";
+            src = self;
+            nativeBuildInputs = [ makeWrapper ];
+            overrideMain = _: {
+              postInstall = ''
+                wrapProgram $out/bin/comma \
+                  --prefix PATH : ${
+                    lib.makeBinPath ([
                       nix
                       fzy
                       nix-index-unwrapped
-                    ]
-                  )
-                }
-              ln -s $out/bin/comma $out/bin/,
-            '';
-          };
-          checkInputs = [ pkgs.rustPackages.clippy ];
-          doCheck = true;
-          cargoTestCommands =
-            x:
-            x
-            ++ [
-              ''
-                cargo clippy --all --all-features --tests -- \
-                                -D warnings || true''
-            ];
-        };
+                    ])
+                  }
+                ln -s $out/bin/comma $out/bin/,
+              '';
+            };
+            checkInputs = [ rustPackages.clippy ];
+            doCheck = true;
+            cargoTestCommands =
+              x:
+              x
+              ++ [
+                ''
+                  cargo clippy --all --all-features --tests -- \
+                                  -D warnings || true''
+              ];
+          }
+        ) { };
     in
     utils.lib.eachDefaultSystem (
       system:
