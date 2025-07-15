@@ -2,7 +2,7 @@
 
 # bash command not found handler
 command_not_found_handle() {
-    comma "$@"
+    comma --ask "$@"
     return $?
 }
 

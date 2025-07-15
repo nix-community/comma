@@ -4,7 +4,7 @@ mod shell;
 
 use std::{
     env,
-    io::Write,
+    io::{self, Write},
     os::unix::prelude::CommandExt,
     path::Path,
     process::{self, Command, ExitCode, Stdio},
@@ -212,6 +212,24 @@ fn run_command_from_cache(
     run_cmd
 }
 
+fn confirmer(run_cmd: &Command) -> bool {
+    loop {
+        print!("Run '{}'? [Y/n]: ", run_cmd.get_program().display());
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+
+        match input.trim().to_lowercase().as_str() {
+            "y" | "yes" | "" => return true,
+            "n" | "no" => return false,
+            _ => {
+                println!("Please enter 'y' or 'n'.");
+            }
+        }
+    }
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -342,7 +360,10 @@ fn main() -> ExitCode {
         // Drop cache before calling exec() to make sure that
         // the cache file is written
         drop(cache);
-        let _ = run_cmd.exec();
+        let answer = if args.ask { confirmer(&run_cmd) } else { true };
+        if answer {
+            let _ = run_cmd.exec();
+        }
     }
 
     ExitCode::SUCCESS
@@ -372,6 +393,10 @@ struct Opt {
         default_value = "nixpkgs"
     )]
     nixpkgs_flake: String,
+
+    /// Ask to confirm the program that will be run.
+    #[clap(short, long, env = "COMMA_ASK_TO_CONFIRM")]
+    ask: bool,
 
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-packages")]
