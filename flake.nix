@@ -55,9 +55,9 @@
                 ln -s $out/bin/comma $out/bin/,
 
                 mkdir -p $out/etc/profile.d
-                cp $src/src/command-not-found.sh $out/etc/profile.d
-                patchShebangs $out/etc/profile.d/command-not-found.sh
-                sed -i "s|comma --ask \"\$@\"|$out\/bin\/comma --ask \"\$@\"|" $out/etc/profile.d/command-not-found.sh
+                cp $src/src/comma-command-not-found.sh $out/etc/profile.d
+                patchShebangs $out/etc/profile.d/comma-command-not-found.sh
+                sed -i "s|comma --ask \"\$@\"|$out\/bin\/comma --ask \"\$@\"|" $out/etc/profile.d/comma-command-not-found.sh
               '';
             };
             checkInputs = [ rustPackages.clippy ];
