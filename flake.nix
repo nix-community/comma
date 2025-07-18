@@ -55,7 +55,9 @@
                 ln -s $out/bin/comma $out/bin/,
 
                 mkdir -p $out/etc/profile.d
+                mkdir -p $out/etc/nushell
                 cp $src/src/comma-command-not-found.sh $out/etc/profile.d
+                cp $src/src/comma-command-not-found.nu $out/etc/nushell
                 patchShebangs $out/etc/profile.d/comma-command-not-found.sh
                 sed -i "s|comma --ask \"\$@\"|$out\/bin\/comma --ask \"\$@\"|" $out/etc/profile.d/comma-command-not-found.sh
               '';
