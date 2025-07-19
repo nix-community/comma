@@ -6,7 +6,7 @@ use std::{
     env,
     io::{self, Write},
     os::unix::prelude::CommandExt,
-    path::Path,
+    path::{Path, PathBuf},
     process::{self, Command, ExitCode, Stdio},
 };
 
@@ -324,9 +324,22 @@ fn main() -> ExitCode {
         .contains("nixpkgs=");
 
     if args.install {
-        let _ = Command::new("nix-env")
-            .args(["-f", "<nixpkgs>", "-iA", basename])
-            .exec();
+        let home_dir = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+        let profile_dir = home_dir.join(".local/state/nix/profiles/profile");
+
+        if let Ok(true) = std::fs::exists(profile_dir) {
+            let _ = Command::new("nix")
+                .args(["profile", "install", format!("nixpkgs#{basename}").as_str()])
+                .env(
+                    "NIX_CONFIG",
+                    "extra-experimental-features = nix-command flakes",
+                )
+                .exec();
+        } else {
+            let _ = Command::new("nix-env")
+                .args(["-f", "<nixpkgs>", "-iA", basename])
+                .exec();
+        }
     } else if args.shell {
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
