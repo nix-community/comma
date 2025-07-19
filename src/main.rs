@@ -113,7 +113,7 @@ fn run_command_or_open_shell(
         }
     };
 
-    trace!("run nix command arguments: {:?}", run_cmd);
+    trace!("run nix command arguments: {run_cmd:?}");
 
     run_cmd
 }
