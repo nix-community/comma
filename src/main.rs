@@ -45,7 +45,7 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
     index::check_database_updated();
 
     let nix_locate_output = Command::new("nix-locate")
-        .args(["--top-level", "--minimal", "--at-root", "--whole-name"])
+        .args(["--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{command}"))
         .output()
         .expect("failed to execute nix-locate");
