@@ -41,17 +41,16 @@
           naersk-lib.buildPackage {
             pname = "comma";
             src = self;
-            nativeBuildInputs = [ makeWrapper ];
             overrideMain = _: {
+              postPatch = ''
+                substituteInPlace ./src/main.rs \
+                  --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"' \
+                  --replace-fail '"nix"' '"${lib.getExe nix}"' \
+                  --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"' \
+                  --replace-fail '"fzy"' '"${lib.getExe fzy}"'
+              '';
+
               postInstall = ''
-                wrapProgram $out/bin/comma \
-                  --prefix PATH : ${
-                    lib.makeBinPath ([
-                      nix
-                      fzy
-                      nix-index-unwrapped
-                    ])
-                  }
                 ln -s $out/bin/comma $out/bin/,
 
                 mkdir -p $out/etc/profile.d
