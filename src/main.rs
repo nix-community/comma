@@ -324,9 +324,27 @@ fn main() -> ExitCode {
         .contains("nixpkgs=");
 
     if args.install {
-        let _ = Command::new("nix-env")
-            .args(["-f", "<nixpkgs>", "-iA", basename])
-            .exec();
+        if Command::new("nix")
+            .args(["profile", "list"])
+            .output()
+            .is_ok_and(|x| !x.stdout.trim_ascii().is_empty())
+        {
+            let _ = Command::new("nix")
+                .args([
+                    "profile",
+                    "install",
+                    format!("{}#{basename}", args.nixpkgs_flake).as_str(),
+                ])
+                .env(
+                    "NIX_CONFIG",
+                    "extra-experimental-features = nix-command flakes",
+                )
+                .exec();
+        } else {
+            let _ = Command::new("nix-env")
+                .args(["-f", "<nixpkgs>", "-iA", basename])
+                .exec();
+        }
     } else if args.shell {
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
