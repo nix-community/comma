@@ -29,11 +29,11 @@
         pkgs.callPackage (
           {
             callPackage,
-            makeWrapper,
             nix,
             fzy,
             nix-index-unwrapped,
             rustPackages,
+            installShellFiles,
           }:
           let
             naersk-lib = callPackage naersk { };
@@ -41,6 +41,10 @@
           naersk-lib.buildPackage {
             pname = "comma";
             src = self;
+
+            nativeBuildInputs = [
+              installShellFiles
+            ];
             overrideMain = _: {
               postPatch = ''
                 substituteInPlace ./src/main.rs \
@@ -67,6 +71,9 @@
                   "$out/etc/nushell/comma-command-not-found.nu" \
                   "$out/etc/fish/functions/comma-command-not-found.fish" \
                   --replace-fail "comma --ask" "$out/bin/comma --ask"
+
+                "$out/bin/comma" --mangen > comma.1
+                installManPage comma.1
               '';
             };
             checkInputs = [ rustPackages.clippy ];

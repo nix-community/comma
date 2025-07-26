@@ -247,6 +247,17 @@ fn main() -> ExitCode {
         }
     };
 
+    if args.mangen {
+        use clap::CommandFactory;
+        let man = clap_mangen::Man::new(Opt::command());
+
+        if let Err(err) = man.render(&mut std::io::stdout()) {
+            panic!("{}", err)
+        } else {
+            return ExitCode::SUCCESS
+        }
+    }
+
     if args.empty_cache {
         if let Some(ref mut cache) = cache {
             cache.empty();
@@ -373,6 +384,10 @@ fn main() -> ExitCode {
 #[derive(Parser)]
 #[clap(version = crate_version!(), trailing_var_arg = true)]
 struct Opt {
+    /// Generate the man page, then exit
+    #[clap(long, hide = true)]
+    mangen: bool,
+    
     /// Install the derivation containing the executable
     #[clap(short, long)]
     install: bool,
@@ -421,6 +436,6 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache"], name = "cmd")]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
     cmd: Vec<String>,
 }
