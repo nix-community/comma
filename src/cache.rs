@@ -66,7 +66,7 @@ impl Drop for Cache {
             debug!("writing cache to disk: {}", self.path.display());
             let bytes = bitcode::encode(&self.data.0);
             if let Err(e) = fs::write(&self.path, bytes) {
-                error!("failed to write cache: {e}");
+                error!("failed to write cache to '{}': {e}", self.path.display());
             }
         }
     }
