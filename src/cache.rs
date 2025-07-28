@@ -1,7 +1,7 @@
 use std::{collections::HashMap, error::Error, fs, path::PathBuf};
 
 use bitcode::{Decode, Encode};
-use log::debug;
+use log::{debug, error};
 
 #[derive(Encode, Decode)]
 struct CacheData(HashMap<String, CacheEntry>);
@@ -66,7 +66,7 @@ impl Drop for Cache {
             debug!("writing cache to disk: {}", self.path.display());
             let bytes = bitcode::encode(&self.data.0);
             if let Err(e) = fs::write(&self.path, bytes) {
-                eprintln!("failed to write cache: {e}");
+                error!("failed to write cache: {e}");
             }
         }
     }

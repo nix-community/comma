@@ -13,7 +13,7 @@ use std::{
 use cache::{Cache, CacheEntry};
 use clap::crate_version;
 use clap::Parser;
-use log::{debug, trace};
+use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
@@ -240,7 +240,7 @@ fn main() -> ExitCode {
     } else {
         match Cache::new() {
             Err(e) => {
-                eprintln!("failed to initialize cache, disabling related functionality: {e}");
+                error!("failed to initialize cache, disabling related functionality: {e}");
                 None
             }
             Ok(x) => Some(x),
