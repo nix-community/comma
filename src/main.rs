@@ -235,6 +235,17 @@ fn main() -> ExitCode {
 
     let args = Opt::parse();
 
+    if args.mangen {
+        use clap::CommandFactory;
+        let man = clap_mangen::Man::new(Opt::command());
+
+        if let Err(err) = man.render(&mut std::io::stdout()) {
+            panic!("{}", err)
+        } else {
+            return ExitCode::SUCCESS;
+        }
+    }
+
     let mut cache = if args.cache_level == 0 {
         None
     } else {
@@ -246,17 +257,6 @@ fn main() -> ExitCode {
             Ok(x) => Some(x),
         }
     };
-
-    if args.mangen {
-        use clap::CommandFactory;
-        let man = clap_mangen::Man::new(Opt::command());
-
-        if let Err(err) = man.render(&mut std::io::stdout()) {
-            panic!("{}", err)
-        } else {
-            return ExitCode::SUCCESS
-        }
-    }
 
     if args.empty_cache {
         if let Some(ref mut cache) = cache {
@@ -387,7 +387,7 @@ struct Opt {
     /// Generate the man page, then exit
     #[clap(long, hide = true)]
     mangen: bool,
-    
+
     /// Install the derivation containing the executable
     #[clap(short, long)]
     install: bool,
