@@ -28,12 +28,14 @@
         pkgs:
         pkgs.callPackage (
           {
+            stdenv,
             callPackage,
             nix,
             fzy,
             nix-index-unwrapped,
             rustPackages,
             installShellFiles,
+            buildPackages,
           }:
           let
             naersk-lib = callPackage naersk { };
@@ -70,7 +72,9 @@
                   "$out/share/comma/command-not-found.fish" \
                   --replace-fail "comma --ask" "$out/bin/comma --ask"
 
-                "$out/bin/comma" --mangen > comma.1
+              ''
+              + lib.optionalString (stdenv.hostPlatform.emulatorAvailable buildPackages) ''
+                ${stdenv.hostPlatform.emulator buildPackages} "$out/bin/comma" --mangen > comma.1
                 installManPage comma.1
               '';
             };
