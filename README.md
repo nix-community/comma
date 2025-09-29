@@ -9,16 +9,16 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 
   comma is in nixpkgs so you can install it just like any other package.
 
-  either install it in your nix environment
-
-  ```bash
-  nix-env -f '<nixpkgs>' -iA comma
-  ```
-
-  or add this snippet to your NixOS configuration.
+  Either add `comma` to `systemPackages` in your NixOS configuration (PREFERRED)
 
   ```nix
   environment.systemPackages = with pkgs; [ comma ];
+  ```
+
+  Or install it in your nix environment. (DISCOURAGED)
+
+  ```bash
+  nix-env -f '<nixpkgs>' -iA comma
   ```
 
 ## Usage
