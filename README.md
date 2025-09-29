@@ -21,6 +21,13 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
   nix-env -f '<nixpkgs>' -iA comma
   ```
 
+  Get the required nix-index database from
+
+  [nix-index-database ad-hoc-download section](https://github.com/nix-community/nix-index-database?tab=readme-ov-file#ad-hoc-download)
+  Remember to keep it up to date
+
+  Alternatively you may use `programs.nix-index-database.comma.enable` in the module from [nix-index-database](https://github.com/nix-community/nix-index-database), in that case do not add `comma` to `systemPackages` yourself.
+
 ## Usage
 
 ```bash
