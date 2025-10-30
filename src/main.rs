@@ -13,7 +13,7 @@ use std::{
 
 use cache::{Cache, CacheEntry};
 use clap::crate_version;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -235,6 +235,8 @@ fn open_manpage(manpage: &Path) -> Command {
     let mut command = Command::new("man");
 
     command.args([manpage.as_os_str()]);
+
+    trace!("run man: {command:?}");
     command
 }
 
@@ -272,7 +274,7 @@ fn main() -> ExitCode {
         }
     }
 
-    if args.cmd.is_empty() {
+    if args.cmd.is_empty() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
         } else {
@@ -280,8 +282,11 @@ fn main() -> ExitCode {
         };
     }
 
-    let command = &args.cmd[0];
-    let trail = &args.cmd[1..];
+    let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
+        (&cmd[0], &cmd[1..])
+    } else {
+        (&args.cmd[0], &args.cmd[1..])
+    };
 
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
@@ -366,7 +371,9 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         );
         println!("{path}");
-    } else if args.show_man {
+    } else if args.subcmds.is_some() {
+        debug!("Opening manpage for {command}");
+
         let path = get_command_path_from_cache(
             &mut cache,
             &entry,
@@ -433,6 +440,7 @@ fn main() -> ExitCode {
 /// Runs programs without installing them
 #[derive(Parser)]
 #[clap(version = crate_version!(), trailing_var_arg = true)]
+#[command(subcommand_negates_reqs = true)]
 struct Opt {
     /// Generate the man page, then exit
     #[clap(long, hide = true)]
@@ -489,8 +497,22 @@ struct Opt {
     #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
     cmd: Vec<String>,
 
+    #[clap(subcommand)]
+    subcmds: Option<SubCmds>,
+}
+
+#[derive(Subcommand)]
+#[clap(disable_help_subcommand = true)]
+enum SubCmds {
     /// Show the manpage if it exists instead of running the executable
+    ///
     /// Currently only supports Section 1 pages for programs.
-    #[clap(short = 'm', long = "show-man")]
-    show_man: bool,
+    Man(ManArgs),
+}
+
+#[derive(Args)]
+struct ManArgs {
+    /// Command to show manpage for
+    #[clap(required = true, name = "cmd")]
+    cmd: Vec<String>,
 }
