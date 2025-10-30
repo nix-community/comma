@@ -438,4 +438,9 @@ struct Opt {
     /// Command to run
     #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
     cmd: Vec<String>,
+
+    /// Show the manpage if it exists instead of running the executable
+    /// Currently only supports Section 1 pages for programs.
+    #[clap(short = 'm', long = "show-man")]
+    show_man: bool,
 }
