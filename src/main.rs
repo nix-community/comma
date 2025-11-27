@@ -7,12 +7,13 @@ use std::{
     io::{self, Write},
     os::unix::prelude::CommandExt,
     path::Path,
+    path::PathBuf,
     process::{self, Command, ExitCode, Stdio},
 };
 
 use cache::{Cache, CacheEntry};
 use clap::crate_version;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -230,6 +231,15 @@ fn confirmer(run_cmd: &Command) -> bool {
     }
 }
 
+fn open_manpage(manpage: &Path) -> Command {
+    let mut command = Command::new("man");
+
+    command.args([manpage.as_os_str()]);
+
+    trace!("run man: {command:?}");
+    command
+}
+
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -264,7 +274,7 @@ fn main() -> ExitCode {
         }
     }
 
-    if args.cmd.is_empty() {
+    if args.cmd.is_empty() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
         } else {
@@ -272,8 +282,11 @@ fn main() -> ExitCode {
         };
     }
 
-    let command = &args.cmd[0];
-    let trail = &args.cmd[1..];
+    let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
+        (&cmd[0], &cmd[1..])
+    } else {
+        (&args.cmd[0], &args.cmd[1..])
+    };
 
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
@@ -358,6 +371,50 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         );
         println!("{path}");
+    } else if args.subcmds.is_some() {
+        debug!("Opening manpage for {command}");
+
+        let path = get_command_path_from_cache(
+            &mut cache,
+            &entry,
+            use_channel,
+            command,
+            &args.nixpkgs_flake,
+        );
+        let mut path: PathBuf = path.into();
+        // Truncate to
+        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/
+        path.pop();
+        path.pop();
+        // Push to
+        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1
+        // as that is where the program manfiles reside. There are a few
+        // that are at `share/man`, but they are just improperly placed
+        path.push("share/man/man1");
+        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1/thing
+        path.push(command);
+        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1/thing.1
+        path.set_extension("1");
+        match std::fs::exists(path.as_path()) {
+            // Open the manpage
+            Ok(true) => {
+                let mut cmd = open_manpage(&path);
+                // Replace this process with the man program
+                let err = cmd.exec();
+                // This code will only run if an error occurs
+                eprintln!("{err:?}");
+                return ExitCode::FAILURE;
+            }
+            // No manpage
+            Ok(false) => {
+                eprintln!("No manpage for \"{command}\" found.");
+            }
+            // Some error
+            Err(err) => {
+                eprintln!("{err:?}");
+                return ExitCode::FAILURE;
+            }
+        }
     } else {
         let mut run_cmd = run_command_from_cache(
             &mut cache,
@@ -383,6 +440,7 @@ fn main() -> ExitCode {
 /// Runs programs without installing them
 #[derive(Parser)]
 #[clap(version = crate_version!(), trailing_var_arg = true)]
+#[command(subcommand_negates_reqs = true)]
 struct Opt {
     /// Generate the man page, then exit
     #[clap(long, hide = true)]
@@ -437,5 +495,24 @@ struct Opt {
 
     /// Command to run
     #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
+    cmd: Vec<String>,
+
+    #[clap(subcommand)]
+    subcmds: Option<SubCmds>,
+}
+
+#[derive(Subcommand)]
+#[clap(disable_help_subcommand = true)]
+enum SubCmds {
+    /// Show the manpage if it exists instead of running the executable
+    ///
+    /// Currently only supports Section 1 pages for programs.
+    Man(ManArgs),
+}
+
+#[derive(Args)]
+struct ManArgs {
+    /// Command to show manpage for
+    #[clap(required = true, name = "cmd")]
     cmd: Vec<String>,
 }
