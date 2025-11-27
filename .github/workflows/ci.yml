@@ -13,6 +13,6 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     if: github.repository_owner == 'nix-community'
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: cachix/install-nix-action@v31
     - run: nix build --extra-experimental-features nix-command -L -f . -I nixpkgs=https://github.com/NixOS/nixpkgs/archive/nixpkgs-unstable.tar.gz --show-trace
