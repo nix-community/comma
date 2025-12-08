@@ -72,4 +72,4 @@ an issue for you, set `COMMA_CACHING=1`.
 
 ## Prebuilt index
 
-https://github.com/Mic92/nix-index-database
+https://github.com/nix-community/nix-index-database
