@@ -366,7 +366,7 @@ fn main() -> ExitCode {
         // nix shell nixpkgs#drvName --command man commandName
         let err = run_command_or_open_shell(
             use_channel,
-            &entry.derivation,
+            &entry.derivation.replace(".out", "^*"),
             "man",
             &[command.to_string()],
             &args.nixpkgs_flake,
