@@ -12,7 +12,7 @@ use std::{
 
 use cache::{Cache, CacheEntry};
 use clap::crate_version;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -264,7 +264,7 @@ fn main() -> ExitCode {
         }
     }
 
-    if args.cmd.is_empty() {
+    if args.cmd.is_empty() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
         } else {
@@ -272,8 +272,11 @@ fn main() -> ExitCode {
         };
     }
 
-    let command = &args.cmd[0];
-    let trail = &args.cmd[1..];
+    let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
+        (&cmd[0], &cmd[1..])
+    } else {
+        (&args.cmd[0], &args.cmd[1..])
+    };
 
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
@@ -358,6 +361,21 @@ fn main() -> ExitCode {
             &args.nixpkgs_flake,
         );
         println!("{path}");
+    } else if args.subcmds.is_some() {
+        // Open manpage via
+        // nix shell nixpkgs#drvName --command man commandName
+        let err = run_command_or_open_shell(
+            use_channel,
+            &entry.derivation.replace(".out", "^*"),
+            "man",
+            &[command.to_string()],
+            &args.nixpkgs_flake,
+        )
+        .exec();
+
+        // This code will only run if an error occurs launching
+        eprintln!("{err:?}");
+        return ExitCode::FAILURE;
     } else {
         let mut run_cmd = run_command_from_cache(
             &mut cache,
@@ -383,6 +401,7 @@ fn main() -> ExitCode {
 /// Runs programs without installing them
 #[derive(Parser)]
 #[clap(version = crate_version!(), trailing_var_arg = true)]
+#[command(subcommand_negates_reqs = true)]
 struct Opt {
     /// Generate the man page, then exit
     #[clap(long, hide = true)]
@@ -437,5 +456,24 @@ struct Opt {
 
     /// Command to run
     #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
+    cmd: Vec<String>,
+
+    #[clap(subcommand)]
+    subcmds: Option<SubCmds>,
+}
+
+#[derive(Subcommand)]
+#[clap(disable_help_subcommand = true)]
+enum SubCmds {
+    /// Show the manpage if it exists instead of running the executable
+    ///
+    /// Currently only supports Section 1 pages for programs.
+    Man(ManArgs),
+}
+
+#[derive(Args)]
+struct ManArgs {
+    /// Command to show manpage for
+    #[clap(required = true, name = "cmd")]
     cmd: Vec<String>,
 }
