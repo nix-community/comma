@@ -7,7 +7,6 @@ use std::{
     io::{self, Write},
     os::unix::prelude::CommandExt,
     path::Path,
-    path::PathBuf,
     process::{self, Command, ExitCode, Stdio},
 };
 
@@ -231,15 +230,6 @@ fn confirmer(run_cmd: &Command) -> bool {
     }
 }
 
-fn open_manpage(manpage: &Path) -> Command {
-    let mut command = Command::new("man");
-
-    command.args([manpage.as_os_str()]);
-
-    trace!("run man: {command:?}");
-    command
-}
-
 fn main() -> ExitCode {
     env_logger::init();
 
@@ -372,49 +362,20 @@ fn main() -> ExitCode {
         );
         println!("{path}");
     } else if args.subcmds.is_some() {
-        debug!("Opening manpage for {command}");
-
-        let path = get_command_path_from_cache(
-            &mut cache,
-            &entry,
+        // Open manpage via
+        // nix shell nixpkgs#drvName --command man commandName
+        let err = run_command_or_open_shell(
             use_channel,
-            command,
+            &entry.derivation,
+            "man",
+            &[command.to_string()],
             &args.nixpkgs_flake,
-        );
-        let mut path: PathBuf = path.into();
-        // Truncate to
-        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/
-        path.pop();
-        path.pop();
-        // Push to
-        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1
-        // as that is where the program manfiles reside. There are a few
-        // that are at `share/man`, but they are just improperly placed
-        path.push("share/man/man1");
-        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1/thing
-        path.push(command);
-        // /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/share/man/man1/thing.1
-        path.set_extension("1");
-        match std::fs::exists(path.as_path()) {
-            // Open the manpage
-            Ok(true) => {
-                let mut cmd = open_manpage(&path);
-                // Replace this process with the man program
-                let err = cmd.exec();
-                // This code will only run if an error occurs
-                eprintln!("{err:?}");
-                return ExitCode::FAILURE;
-            }
-            // No manpage
-            Ok(false) => {
-                eprintln!("No manpage for \"{command}\" found.");
-            }
-            // Some error
-            Err(err) => {
-                eprintln!("{err:?}");
-                return ExitCode::FAILURE;
-            }
-        }
+        )
+        .exec();
+
+        // This code will only run if an error occurs launching
+        eprintln!("{err:?}");
+        return ExitCode::FAILURE;
     } else {
         let mut run_cmd = run_command_from_cache(
             &mut cache,
