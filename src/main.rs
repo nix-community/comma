@@ -11,8 +11,7 @@ use std::{
 };
 
 use cache::{Cache, CacheEntry};
-use clap::crate_version;
-use clap::{Args, Parser, Subcommand};
+use clap::{crate_version, Args, Parser, Subcommand, ValueHint};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -455,7 +454,7 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd", value_hint = ValueHint::CommandWithArguments)]
     cmd: Vec<String>,
 
     #[clap(subcommand)]
