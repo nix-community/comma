@@ -3,6 +3,8 @@
 # shellcheck shell=bash
 #
 
+git pull
+
 NEWVERSION="$1"
 
 if [[ $NEWVERSION == "" ]]; then
