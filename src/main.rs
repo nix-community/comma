@@ -11,8 +11,8 @@ use std::{
 };
 
 use cache::{Cache, CacheEntry};
-use clap::crate_version;
-use clap::{Args, Parser, Subcommand};
+use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
+use clap_complete::{generate, Generator, Shell};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -246,6 +246,13 @@ fn main() -> ExitCode {
         }
     }
 
+    if let Some(shell) = args.print_completions {
+        let mut cmd = Opt::command();
+        eprintln!("Generating completion file for {shell}...");
+        print_completions(shell, &mut cmd);
+        return ExitCode::SUCCESS;
+    }
+
     let mut cache = if args.cache_level == 0 {
         None
     } else {
@@ -398,6 +405,15 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
+    generate(
+        generator,
+        cmd,
+        cmd.get_name().to_string(),
+        &mut io::stdout(),
+    );
+}
+
 /// Runs programs without installing them
 #[derive(Parser)]
 #[clap(version = crate_version!(), trailing_var_arg = true)]
@@ -432,6 +448,10 @@ struct Opt {
     #[clap(short, long, env = "COMMA_ASK_TO_CONFIRM")]
     ask: bool,
 
+    /// Print completions for the given shell and exit
+    #[clap(short = 'c', long = "print-completions")]
+    print_completions: Option<Shell>,
+
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-packages")]
     print_packages: bool,
@@ -455,7 +475,7 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen"], name = "cmd")]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions"], name = "cmd", value_hint = ValueHint::Other)]
     cmd: Vec<String>,
 
     #[clap(subcommand)]
