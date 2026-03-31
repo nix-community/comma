@@ -73,3 +73,11 @@ an issue for you, set `COMMA_CACHING=1`.
 ## Prebuilt index
 
 https://github.com/nix-community/nix-index-database
+
+## Running with Sudo
+
+comma requires the NIX_INDEX_DATABASE environment variable to exist to find the database location. 
+Sudo by default doesn't pass environment variables without the extra `-E` arg.
+```bash
+sudo -E , hello 
+```
