@@ -89,7 +89,7 @@ fn run_command_or_open_shell(
     use_channel: bool,
     choice: &str,
     command: &str,
-    trail: &[String],
+    trail: &[&str],
     nixpkgs_flake: &str,
 ) -> Command {
     let mut run_cmd = Command::new("nix");
@@ -375,7 +375,7 @@ fn main() -> ExitCode {
             use_channel,
             &entry.derivation.replace(".out", "^*"),
             "man",
-            &[command.to_string()],
+            &[command],
             &args.nixpkgs_flake,
         )
         .exec();
