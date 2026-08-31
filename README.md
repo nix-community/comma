@@ -34,6 +34,34 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 , cowsay neato
 ```
 
+### Shell completion
+
+comma ships shell completion for bash, elvish, fish, powershell and zsh via
+[clap](https://github.com/clap-rs/clap)'s dynamic completion engine
+(`CompleteEnv`). Completing the command name (e.g. typing `, rar` and pressing
+tab) queries the `nix-index` database via `nix-locate` to suggest matching
+executables, in addition to completing comma's own flags.
+
+Since comma is packaged in nixpkgs, `installShellCompletion` wires up the
+completion scripts automatically when you install `comma` (or `,`) via
+`systemPackages` or `nix-env`. If you're running comma from a local build
+instead, add one of the following to your shell's startup file:
+
+```bash
+# bash
+source <(COMPLETE=bash comma)
+```
+
+```fish
+# fish
+COMPLETE=fish comma | source
+```
+
+```zsh
+# zsh
+source <(COMPLETE=zsh comma)
+```
+
 ### Cache
 
 Comma supports caching both the choices (i.e., once you select a derivation for

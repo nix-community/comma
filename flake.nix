@@ -82,14 +82,14 @@
                   installManPage comma.1
 
                   installShellCompletion --cmd comma \
-                    --bash <(${emulator} $out/bin/comma --print-completions bash) \
-                    --fish <(${emulator} $out/bin/comma --print-completions fish) \
-                    --zsh <(${emulator} $out/bin/comma --print-completions zsh)
+                    --bash <(COMPLETE=bash ${emulator} $out/bin/comma) \
+                    --fish <(COMPLETE=fish ${emulator} $out/bin/comma) \
+                    --zsh <(COMPLETE=zsh ${emulator} $out/bin/comma)
 
                   installShellCompletion --cmd , \
-                    --bash <(${emulator} $out/bin/, --print-completions bash) \
-                    --fish <(${emulator} $out/bin/, --print-completions fish) \
-                    --zsh <(${emulator} $out/bin/, --print-completions zsh)
+                    --bash <(COMPLETE=bash ${emulator} $out/bin/,) \
+                    --fish <(COMPLETE=fish ${emulator} $out/bin/,) \
+                    --zsh <(COMPLETE=zsh ${emulator} $out/bin/,)
                 '';
             };
             checkInputs = [ rustPackages.clippy ];

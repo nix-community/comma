@@ -3,7 +3,9 @@ mod index;
 mod shell;
 
 use std::{
+    collections::HashSet,
     env,
+    ffi::OsStr,
     io::{self, Write},
     os::unix::prelude::CommandExt,
     path::Path,
@@ -12,7 +14,10 @@ use std::{
 
 use cache::{Cache, CacheEntry};
 use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{generate, Generator, Shell};
+use clap_complete::{
+    engine::{ArgValueCompleter, CompletionCandidate},
+    generate, CompleteEnv, Generator, Shell,
+};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -73,6 +78,67 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
             .map(|s| s.to_owned())
             .collect(),
     )
+}
+
+/// Shell completion for the command to run, backed by the nix-index database.
+///
+/// Looks up executables in `/bin` whose name starts with `current` (e.g. typing
+/// `, ra` and pressing tab could suggest `rar`, `rare`, `rars`, ...), using the
+/// same prefix matching semantics as `nix-locate --at-root` (anchors the
+/// pattern at the start of the path but not the end).
+fn complete_command(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+
+    let Ok(nix_locate_output) = Command::new("nix-locate")
+        .args(["--at-root"])
+        .arg(format!("/bin/{current}"))
+        .output()
+    else {
+        return Vec::new();
+    };
+
+    if !nix_locate_output.status.success() {
+        return Vec::new();
+    }
+
+    let Ok(stdout) = std::str::from_utf8(&nix_locate_output.stdout) else {
+        return Vec::new();
+    };
+
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    for line in stdout.lines() {
+        // Each line looks like:
+        // <attr>   <size>   <type>   <store path>
+        // where <store path> ends with `/bin/<name>`.
+        let mut fields = line.split_whitespace();
+        let Some(attr) = fields.next() else { continue };
+        let (Some(_size), Some(_kind), Some(path)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+
+        let Some(name) = path.rsplit('/').next() else {
+            continue;
+        };
+        if name.is_empty() || !name.starts_with(current) {
+            continue;
+        }
+
+        if !seen.insert(name.to_owned()) {
+            continue;
+        }
+
+        let attr = attr.trim_start_matches('(').trim_end_matches(')');
+        let package = attr.rsplit_once('.').map_or(attr, |(base, _)| base);
+
+        candidates.push(CompletionCandidate::new(name).help(Some(package.to_owned().into())));
+    }
+
+    candidates
 }
 
 fn index_database_pick(command: &str, picker: &str) -> Option<String> {
@@ -231,6 +297,22 @@ fn confirmer(run_cmd: &Command) -> bool {
 }
 
 fn main() -> ExitCode {
+    let bin_name = std::env::args()
+        .next()
+        .and_then(|p| {
+            Path::new(&p)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "comma".into());
+
+    // Must run before any output is written to stdout, and before argument
+    // parsing, since it handles `COMPLETE=<shell> <bin>`-activated shell
+    // completion requests and exits early when one is being served.
+    CompleteEnv::with_factory(Opt::command)
+        .bin(bin_name.clone())
+        .complete();
+
     env_logger::init();
 
     let args = Opt::parse();
@@ -249,10 +331,6 @@ fn main() -> ExitCode {
     if let Some(shell) = args.print_completions {
         let mut cmd = Opt::command();
         eprintln!("Generating completion file for {shell}...");
-        let bin_name = std::env::args()
-            .next()
-            .and_then(|p| Path::new(&p).file_name().map(|f| f.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "comma".into());
         print_completions(shell, &mut cmd, &bin_name);
         return ExitCode::SUCCESS;
     }
@@ -275,7 +353,7 @@ fn main() -> ExitCode {
         }
     }
 
-    if args.cmd.is_empty() && args.subcmds.is_none() {
+    if args.command.is_none() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
         } else {
@@ -283,11 +361,15 @@ fn main() -> ExitCode {
         };
     }
 
-    let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
-        (&cmd[0], &cmd[1..])
-    } else {
-        (&args.cmd[0], &args.cmd[1..])
-    };
+    let (command, trail): (&String, &[String]) =
+        if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
+            (&cmd[0], &cmd[1..])
+        } else {
+            (
+                args.command.as_ref().expect("command is required"),
+                args.trail.as_slice(),
+            )
+        };
 
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
@@ -479,8 +561,17 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions"], name = "cmd", value_hint = ValueHint::Other)]
-    cmd: Vec<String>,
+    #[clap(
+        required_unless_present_any = ["empty_cache", "mangen", "print_completions"],
+        name = "cmd",
+        value_hint = ValueHint::Other,
+        add = ArgValueCompleter::new(complete_command),
+    )]
+    command: Option<String>,
+
+    /// Arguments passed to the command
+    #[clap(name = "trail", value_hint = ValueHint::Other, allow_hyphen_values = true)]
+    trail: Vec<String>,
 
     #[clap(subcommand)]
     subcmds: Option<SubCmds>,
@@ -498,6 +589,107 @@ enum SubCmds {
 #[derive(Args)]
 struct ManArgs {
     /// Command to show manpage for
-    #[clap(required = true, name = "cmd")]
+    #[clap(required = true, name = "cmd", add = ArgValueCompleter::new(complete_command))]
     cmd: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Opt;
+    use clap::Parser;
+
+    #[test]
+    fn parses_command_and_trail() {
+        let opt = Opt::parse_from(["comma", "ls", "-la", "foo"]);
+        assert_eq!(opt.command.as_deref(), Some("ls"));
+        assert_eq!(opt.trail, vec!["-la".to_string(), "foo".to_string()]);
+    }
+
+    #[test]
+    fn parses_flags_before_command() {
+        let opt = Opt::parse_from(["comma", "--install", "ls"]);
+        assert!(opt.install);
+        assert_eq!(opt.command.as_deref(), Some("ls"));
+        assert!(opt.trail.is_empty());
+    }
+
+    #[test]
+    fn empty_cache_alone_is_valid() {
+        let opt = Opt::parse_from(["comma", "--empty-cache"]);
+        assert!(opt.command.is_none());
+        assert!(opt.empty_cache);
+    }
+
+    #[test]
+    fn missing_command_is_error() {
+        assert!(Opt::try_parse_from(["comma"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod complete_command_tests {
+    use super::complete_command;
+    use std::{ffi::OsStr, io::Write, os::unix::fs::PermissionsExt};
+
+    /// Puts a fake `nix-locate` executable on `PATH` for the duration of the
+    /// test, producing the given canned output.
+    fn with_fake_nix_locate<T>(output: &str, test: impl FnOnce() -> T) -> T {
+        let dir = std::env::temp_dir().join(format!("comma-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script_path = dir.join("nix-locate");
+        {
+            let mut script = std::fs::File::create(&script_path).unwrap();
+            writeln!(script, "#!/bin/sh").unwrap();
+            writeln!(script, "cat <<'DATA'\n{output}DATA").unwrap();
+        }
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let old_path = std::env::var_os("PATH");
+        let new_path = match &old_path {
+            Some(p) => format!("{}:{}", dir.display(), p.to_string_lossy()),
+            None => dir.display().to_string(),
+        };
+        // SAFETY: tests in this module do not run concurrently with code that
+        // reads `PATH` (all such reads happen within `test`, spawned below).
+        unsafe { std::env::set_var("PATH", new_path) };
+
+        let result = test();
+
+        match old_path {
+            Some(p) => unsafe { std::env::set_var("PATH", p) },
+            None => unsafe { std::env::remove_var("PATH") },
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        result
+    }
+
+    const SAMPLE_OUTPUT: &str = "\
+rare-regex.out                            5,659,424 x /nix/store/kkdvcdd51yw0jb59h8mihqj0mdbm2k5f-rare-regex-0.5.2/bin/rare
+rare.out                                     20,560 x /nix/store/habbma2yyhm8yp120f0srziy8lm0vq4y-rare-1.10.11/bin/rare
+rars.out                                        239 x /nix/store/zwiml4j4ddmh06321b1gph04dy5asyfp-rars-1.6/bin/rars
+rar2hashcat.out                              69,184 x /nix/store/jswfx1637ap5zrpvynf5h295p6dhzm0h-rar2hashcat-1.0/bin/rar2hashcat
+john.out                                          0 s /nix/store/dj3cs5ncnzg2jgfprjlifg9knyfjkq3z-john-1.9.0-Jumbo-1-unstable-2026-07-07/bin/rar2john
+";
+
+    #[test]
+    fn completes_and_dedups_executable_names() {
+        let candidates =
+            with_fake_nix_locate(SAMPLE_OUTPUT, || complete_command(OsStr::new("rar")));
+
+        let mut values: Vec<String> = candidates
+            .iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect();
+        values.sort();
+
+        assert_eq!(values, vec!["rar2hashcat", "rar2john", "rare", "rars"]);
+    }
+
+    #[test]
+    fn non_utf8_input_yields_no_candidates() {
+        use std::os::unix::ffi::OsStrExt;
+        let invalid = OsStr::from_bytes(&[0xff, 0xfe]);
+        assert!(complete_command(invalid).is_empty());
+    }
 }
