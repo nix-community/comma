@@ -12,7 +12,7 @@ use std::{
 
 use cache::{Cache, CacheEntry};
 use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{generate, Generator, Shell};
+use clap_complete::{generate, Shell};
 use log::{debug, error, trace};
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -73,6 +73,39 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
             .map(|s| s.to_owned())
             .collect(),
     )
+}
+
+/// Queries the nix-index database for executable names whose `/bin` path
+/// starts with `partial`, returning a deduplicated, sorted list of command
+/// names (not derivations). This powers dynamic shell completion of the
+/// command to run, e.g. typing `, rar<TAB>` shows `rare`, `rars`, etc.
+fn complete_commands(partial: &str) -> Vec<String> {
+    let Ok(nix_locate_output) = Command::new("nix-locate")
+        .args(["--at-root"])
+        .arg(format!("/bin/{partial}"))
+        .output()
+    else {
+        return Vec::new();
+    };
+
+    if !nix_locate_output.status.success() {
+        return Vec::new();
+    }
+
+    let Ok(stdout) = std::str::from_utf8(&nix_locate_output.stdout) else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().next_back())
+        .filter_map(|path| path.rsplit('/').next())
+        .map(str::to_owned)
+        .collect();
+
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 fn index_database_pick(command: &str, picker: &str) -> Option<String> {
@@ -257,6 +290,13 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    if let Some(ref partial) = args.complete_commands {
+        for name in complete_commands(partial) {
+            println!("{name}");
+        }
+        return ExitCode::SUCCESS;
+    }
+
     let mut cache = if args.cache_level == 0 {
         None
     } else {
@@ -409,13 +449,87 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
-    generate(
-        generator,
-        cmd,
-        bin_name,
-        &mut io::stdout(),
-    );
+fn print_completions(shell: Shell, cmd: &mut clap::Command, bin_name: &str) {
+    let mut buf = Vec::new();
+    generate(shell, cmd, bin_name, &mut buf);
+    let script = String::from_utf8(buf).expect("clap_complete output should be valid UTF-8");
+
+    // Patch the generated completion scripts to add dynamic completion of
+    // the command name (the `cmd` argument), sourced from the nix-index
+    // database via the hidden `--complete-commands` flag. clap_complete's
+    // static generators have no notion of nix-index, so this is done as a
+    // post-processing step on their otherwise unchanged output.
+    let script = match shell {
+        Shell::Bash => patch_bash_completions(script),
+        Shell::Zsh => patch_zsh_completions(script),
+        Shell::Fish => patch_fish_completions(script, bin_name),
+        _ => script,
+    };
+
+    io::stdout()
+        .write_all(script.as_bytes())
+        .expect("failed to write completions to stdout");
+}
+
+/// Rewrites the `${COMP_CWORD} -eq N` branches (which unconditionally offer
+/// flags as soon as the command name is being completed) to instead query
+/// `--complete-commands` for non-flag input.
+fn patch_bash_completions(mut script: String) -> String {
+    for depth in 1..=4 {
+        let old = format!(
+            "if [[ ${{cur}} == -* || ${{COMP_CWORD}} -eq {depth} ]] ; then\n                COMPREPLY=( $(compgen -W \"${{opts}}\" -- \"${{cur}}\") )\n                return 0\n            fi"
+        );
+
+        if !script.contains(&old) {
+            continue;
+        }
+
+        let new = format!(
+            "if [[ ${{cur}} == -* ]] ; then\n                COMPREPLY=( $(compgen -W \"${{opts}}\" -- \"${{cur}}\") )\n                return 0\n            elif [[ ${{COMP_CWORD}} -eq {depth} ]] ; then\n                COMPREPLY=( $(compgen -W \"$($1 --complete-commands \"${{cur}}\" 2>/dev/null)\" -- \"${{cur}}\") )\n                return 0\n            fi"
+        );
+
+        script = script.replace(&old, &new);
+    }
+    script
+}
+
+/// Points the empty `ValueHint::Other` completion action for the `cmd`
+/// positional at a new `_comma_complete_commands` function, which is
+/// appended to the script.
+fn patch_zsh_completions(mut script: String) -> String {
+    const MARKERS: &[&str] = &["Command to run:", "Command to show manpage for:"];
+
+    let mut patched = false;
+    for marker in MARKERS {
+        let old = format!("{marker}'");
+        if script.contains(&old) {
+            script = script.replace(&old, &format!("{marker}_comma_complete_commands'"));
+            patched = true;
+        }
+    }
+
+    if !patched {
+        return script;
+    }
+
+    let helper = "\n(( $+functions[_comma_complete_commands] )) ||\n_comma_complete_commands() {\n    local -a commands\n    commands=(${(f)\"$(${service} --complete-commands \"$PREFIX\" 2>/dev/null)\"})\n    _describe -t commands 'nix-index commands' commands\n}\n";
+
+    match script.find("\nif [ \"$funcstack[1]\"") {
+        Some(idx) => {
+            script.insert_str(idx, helper);
+            script
+        }
+        None => script + helper,
+    }
+}
+
+/// Adds completions for the `cmd` positional (both for the top-level command
+/// and the `man` subcommand), which the fish generator otherwise leaves
+/// entirely uncompleted.
+fn patch_fish_completions(script: String, bin_name: &str) -> String {
+    format!(
+        "{script}\ncomplete -c {bin_name} -n \"__fish_{bin_name}_needs_command\" -f -a \"({bin_name} --complete-commands (commandline -ct) 2>/dev/null)\"\ncomplete -c {bin_name} -n \"__fish_{bin_name}_using_subcommand man\" -f -a \"({bin_name} --complete-commands (commandline -ct) 2>/dev/null)\"\n"
+    )
 }
 
 /// Runs programs without installing them
@@ -456,6 +570,12 @@ struct Opt {
     #[clap(short = 'c', long = "print-completions")]
     print_completions: Option<Shell>,
 
+    /// Print command names from the nix-index database that start with the
+    /// given prefix. Used internally by shell completion scripts to
+    /// dynamically complete the command to run.
+    #[clap(long = "complete-commands", hide = true)]
+    complete_commands: Option<String>,
+
     /// Print the package containing the executable
     #[clap(short = 'p', long = "print-packages")]
     print_packages: bool,
@@ -479,7 +599,7 @@ struct Opt {
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions"], name = "cmd", value_hint = ValueHint::Other)]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "complete_commands"], name = "cmd", value_hint = ValueHint::Other)]
     cmd: Vec<String>,
 
     #[clap(subcommand)]
@@ -498,6 +618,6 @@ enum SubCmds {
 #[derive(Args)]
 struct ManArgs {
     /// Command to show manpage for
-    #[clap(required = true, name = "cmd")]
+    #[clap(required = true, name = "cmd", value_hint = ValueHint::Other)]
     cmd: Vec<String>,
 }

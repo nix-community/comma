@@ -34,6 +34,18 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 , cowsay neato
 ```
 
+### Shell completion
+
+comma ships bash, fish and zsh completions (installed automatically when using
+the Nix package). Pressing `<TAB>` after `,` completes the command name by
+querying the nix-index database for executables whose name starts with what
+you've typed so far, e.g.:
+
+```bash
+$ , rar<TAB>
+rar2hashcat  rar2john  rare  rarp  rarpwatch  rars  rarun2
+```
+
 ### Cache
 
 Comma supports caching both the choices (i.e., once you select a derivation for
