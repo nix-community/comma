@@ -86,14 +86,10 @@
                     --fish <(${emulator} $out/bin/comma --print-completions fish) \
                     --zsh <(${emulator} $out/bin/comma --print-completions zsh)
 
-                  # TODO: Add , other shells too
-                  cat >>$out/share/zsh/site-functions/_comma <<'EOF'
-                    if [ "$funcstack[1]" = "_comma" ]; then
-                        _comma "$@"
-                    else
-                        compdef _comma ,
-                    fi
-                  EOF
+                  installShellCompletion --cmd , \
+                    --bash <(${emulator} $out/bin/, --print-completions bash) \
+                    --fish <(${emulator} $out/bin/, --print-completions fish) \
+                    --zsh <(${emulator} $out/bin/, --print-completions zsh)
                 '';
             };
             checkInputs = [ rustPackages.clippy ];

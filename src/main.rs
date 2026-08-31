@@ -249,7 +249,11 @@ fn main() -> ExitCode {
     if let Some(shell) = args.print_completions {
         let mut cmd = Opt::command();
         eprintln!("Generating completion file for {shell}...");
-        print_completions(shell, &mut cmd);
+        let bin_name = std::env::args()
+            .next()
+            .and_then(|p| Path::new(&p).file_name().map(|f| f.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "comma".into());
+        print_completions(shell, &mut cmd, &bin_name);
         return ExitCode::SUCCESS;
     }
 
@@ -405,11 +409,11 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
+fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
     generate(
         generator,
         cmd,
-        cmd.get_name().to_string(),
+        bin_name,
         &mut io::stdout(),
     );
 }
