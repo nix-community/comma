@@ -76,8 +76,7 @@ https://github.com/nix-community/nix-index-database
 
 ## Running with Sudo
 
-comma requires the NIX_INDEX_DATABASE environment variable to exist to find the database location. 
-Sudo by default doesn't pass environment variables without the extra `-E` arg.
+If your nix-index isn't at the default location then you will need to pass the NIX_INDEX_DATABASE variable.
 ```bash
-sudo --preserve-env=NIX_INDEX_DATABASE , hello 
+sudo --preserve-env=NIX_INDEX_DATABASE , hello
 ```
