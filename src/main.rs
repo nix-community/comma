@@ -3,7 +3,6 @@ mod index;
 mod shell;
 
 use std::{
-    collections::HashSet,
     env,
     ffi::OsStr,
     io::{self, Write},
@@ -111,11 +110,13 @@ fn complete_command(current: &OsStr) -> Vec<CompletionCandidate> {
 }
 
 /// Parses the output of `nix-locate --at-root "/bin/{current}"` into
-/// deduplicated completion candidates whose executable name starts with
-/// `current`. Pulled out of [`complete_command`] as a pure function so it can
-/// be unit-tested without spawning a subprocess.
+/// completion candidates whose executable name starts with `current`. Not
+/// deduplicated: if multiple packages provide an executable with the same
+/// name, a candidate is emitted for each so the user can see (via the help
+/// text) every package that provides it. Pulled out of [`complete_command`]
+/// as a pure function so it can be unit-tested without spawning a
+/// subprocess.
 fn parse_nix_locate_output(stdout: &str, current: &str) -> Vec<CompletionCandidate> {
-    let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
     for line in stdout.lines() {
@@ -133,10 +134,6 @@ fn parse_nix_locate_output(stdout: &str, current: &str) -> Vec<CompletionCandida
             continue;
         };
         if name.is_empty() || !name.starts_with(current) {
-            continue;
-        }
-
-        if !seen.insert(name.to_owned()) {
             continue;
         }
 
@@ -648,7 +645,7 @@ john.out                                          0 s /nix/store/dj3cs5ncnzg2jgf
 ";
 
     #[test]
-    fn completes_and_dedups_executable_names() {
+    fn completes_all_executable_names_without_deduplicating() {
         let candidates = parse_nix_locate_output(SAMPLE_OUTPUT, "rar");
 
         let mut values: Vec<String> = candidates
@@ -657,7 +654,27 @@ john.out                                          0 s /nix/store/dj3cs5ncnzg2jgf
             .collect();
         values.sort();
 
-        assert_eq!(values, vec!["rar2hashcat", "rar2john", "rare", "rars"]);
+        // "rare" is provided by both `rare-regex` and `rare`, so it must
+        // appear twice: results are not deduplicated, so the user can see
+        // every package that provides a matching executable.
+        assert_eq!(
+            values,
+            vec!["rar2hashcat", "rar2john", "rare", "rare", "rars"]
+        );
+    }
+
+    #[test]
+    fn distinguishes_duplicate_names_by_help_text() {
+        let candidates = parse_nix_locate_output(SAMPLE_OUTPUT, "rare");
+
+        let mut helps: Vec<String> = candidates
+            .iter()
+            .filter(|c| c.get_value() == "rare")
+            .map(|c| c.get_help().map(|h| h.to_string()).unwrap_or_default())
+            .collect();
+        helps.sort();
+
+        assert_eq!(helps, vec!["rare", "rare-regex"]);
     }
 
     #[test]
