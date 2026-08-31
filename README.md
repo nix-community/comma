@@ -42,6 +42,13 @@ comma ships shell completion for bash, elvish, fish, powershell and zsh via
 tab) queries the `nix-index` database via `nix-locate` to suggest matching
 executables, in addition to completing comma's own flags.
 
+Some shells (e.g. zsh) display a second column alongside each suggested
+executable name, showing one of the packages that provides it. This column
+is only a hint and is not used to select a package: comma always looks up
+every package matching the executable name you accepted, so if more than one
+package provides it, you'll still need to pick the desired one from comma's
+own chooser (e.g. `fzy`) afterwards.
+
 Since comma is packaged in nixpkgs, `installShellCompletion` wires up the
 completion scripts automatically when you install `comma` (or `,`) via
 `systemPackages` or `nix-env`. If you're running comma from a local build

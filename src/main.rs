@@ -113,7 +113,10 @@ fn complete_command(current: &OsStr) -> Vec<CompletionCandidate> {
 /// completion candidates whose executable name starts with `current`. Not
 /// deduplicated: if multiple packages provide an executable with the same
 /// name, a candidate is emitted for each so the user can see (via the help
-/// text) every package that provides it. Pulled out of [`complete_command`]
+/// text) every package that provides it, though the help text is
+/// informational only — accepting a completion still runs the full command
+/// lookup, so the user picks the desired package from comma's chooser if
+/// more than one provides the executable. Pulled out of [`complete_command`]
 /// as a pure function so it can be unit-tested without spawning a
 /// subprocess.
 fn parse_nix_locate_output(stdout: &str, current: &str) -> Vec<CompletionCandidate> {
