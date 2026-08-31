@@ -107,6 +107,14 @@ fn complete_command(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
 
+    parse_nix_locate_output(stdout, current)
+}
+
+/// Parses the output of `nix-locate --at-root "/bin/{current}"` into
+/// deduplicated completion candidates whose executable name starts with
+/// `current`. Pulled out of [`complete_command`] as a pure function so it can
+/// be unit-tested without spawning a subprocess.
+fn parse_nix_locate_output(stdout: &str, current: &str) -> Vec<CompletionCandidate> {
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
 
@@ -628,41 +636,8 @@ mod tests {
 
 #[cfg(test)]
 mod complete_command_tests {
-    use super::complete_command;
-    use std::{ffi::OsStr, io::Write, os::unix::fs::PermissionsExt};
-
-    /// Puts a fake `nix-locate` executable on `PATH` for the duration of the
-    /// test, producing the given canned output.
-    fn with_fake_nix_locate<T>(output: &str, test: impl FnOnce() -> T) -> T {
-        let dir = std::env::temp_dir().join(format!("comma-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let script_path = dir.join("nix-locate");
-        {
-            let mut script = std::fs::File::create(&script_path).unwrap();
-            writeln!(script, "#!/bin/sh").unwrap();
-            writeln!(script, "cat <<'DATA'\n{output}DATA").unwrap();
-        }
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let old_path = std::env::var_os("PATH");
-        let new_path = match &old_path {
-            Some(p) => format!("{}:{}", dir.display(), p.to_string_lossy()),
-            None => dir.display().to_string(),
-        };
-        // SAFETY: tests in this module do not run concurrently with code that
-        // reads `PATH` (all such reads happen within `test`, spawned below).
-        unsafe { std::env::set_var("PATH", new_path) };
-
-        let result = test();
-
-        match old_path {
-            Some(p) => unsafe { std::env::set_var("PATH", p) },
-            None => unsafe { std::env::remove_var("PATH") },
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-
-        result
-    }
+    use super::{complete_command, parse_nix_locate_output};
+    use std::ffi::OsStr;
 
     const SAMPLE_OUTPUT: &str = "\
 rare-regex.out                            5,659,424 x /nix/store/kkdvcdd51yw0jb59h8mihqj0mdbm2k5f-rare-regex-0.5.2/bin/rare
@@ -674,8 +649,7 @@ john.out                                          0 s /nix/store/dj3cs5ncnzg2jgf
 
     #[test]
     fn completes_and_dedups_executable_names() {
-        let candidates =
-            with_fake_nix_locate(SAMPLE_OUTPUT, || complete_command(OsStr::new("rar")));
+        let candidates = parse_nix_locate_output(SAMPLE_OUTPUT, "rar");
 
         let mut values: Vec<String> = candidates
             .iter()
@@ -684,6 +658,16 @@ john.out                                          0 s /nix/store/dj3cs5ncnzg2jgf
         values.sort();
 
         assert_eq!(values, vec!["rar2hashcat", "rar2john", "rare", "rars"]);
+    }
+
+    #[test]
+    fn help_text_strips_output_suffix_and_toplevel_markers() {
+        let candidates = parse_nix_locate_output(SAMPLE_OUTPUT, "rar2j");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].get_help().map(|h| h.to_string()),
+            Some("john".to_owned())
+        );
     }
 
     #[test]
