@@ -7,7 +7,7 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 
 ## Installation
 
-  comma is in nixpkgs so you can install it just like any other package.
+  comma is in Nixpkgs so you can install it just like any other package.
 
   Either add `comma` to `systemPackages` in your NixOS configuration (PREFERRED)
 
@@ -32,6 +32,53 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 
 ```bash
 , cowsay neato
+```
+
+### Shell completion
+
+comma has shell completion for bash, elvish, fish, powershell and zsh via
+[clap](https://github.com/clap-rs/clap).
+Completing the command name (e.g. typing `, rar` and pressing
+tab) queries the `nix-index` database via `nix-locate` to suggest matching
+executables, in addition to completing comma's own flags.
+
+Some shells (e.g. fish) display a second column alongside each suggested
+executable name, showing one of the packages that provides it. This column
+is only a hint and is not used to select a package: comma always looks up
+every package matching the executable name you accepted, so if more than one
+package provides it, you'll still need to pick the desired one from comma's
+own chooser (e.g. `fzy`) afterward.
+
+Completion for bash, fish, zsh is included in the package, either source them or include one of the sections below in your shell's config.
+
+```bash
+# bash
+source <(COMPLETE=bash comma)
+source <(COMPLETE=bash ,)
+```
+
+```fish
+# fish
+COMPLETE=fish comma | source
+COMPLETE=fish , | source
+```
+
+```zsh
+# zsh
+source <(COMPLETE=zsh comma)
+source <(COMPLETE=zsh ,)
+```
+
+```elvish
+# elvish
+eval (env COMPLETE=elvish comma | slurp)
+eval (env COMPLETE=elvish , | slurp)
+```
+
+```powershell
+# powershell
+& { $env:COMPLETE="powershell"; comma } | Out-String | iex
+# powershell does not allow executables with the name ,
 ```
 
 ### Cache
