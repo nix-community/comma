@@ -310,15 +310,16 @@ where
     T: Into<OsString>,
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
-    let Some(command_index) = find_command_index(&args) else {
+    let Some(command_start) = find_command_start(&args) else {
         return args;
     };
 
-    if matches!(args[command_index].to_str(), Some("man")) {
+    if command_start.after_double_dash || matches!(args[command_start.index].to_str(), Some("man"))
+    {
         return args;
     }
 
-    let has_special_passthrough_flag = args[command_index + 1..]
+    let has_special_passthrough_flag = args[command_start.index + 1..]
         .iter()
         .take_while(|arg| arg != &&OsStr::new("--"))
         .any(|arg| matches!(arg.to_str(), Some("--help" | "-h" | "--version" | "-V")));
@@ -328,13 +329,18 @@ where
     }
 
     let mut normalized = Vec::with_capacity(args.len() + 1);
-    normalized.extend(args[..=command_index].iter().cloned());
+    normalized.extend(args[..=command_start.index].iter().cloned());
     normalized.push(OsString::from("--"));
-    normalized.extend(args[command_index + 1..].iter().cloned());
+    normalized.extend(args[command_start.index + 1..].iter().cloned());
     normalized
 }
 
-fn find_command_index(args: &[OsString]) -> Option<usize> {
+struct CommandStart {
+    index: usize,
+    after_double_dash: bool,
+}
+
+fn find_command_start(args: &[OsString]) -> Option<CommandStart> {
     let mut pending_value = false;
 
     for (index, arg) in args.iter().enumerate().skip(1) {
@@ -348,7 +354,12 @@ fn find_command_index(args: &[OsString]) -> Option<usize> {
         };
 
         match arg {
-            "--" => return (index + 1 < args.len()).then_some(index + 1),
+            "--" => {
+                return (index + 1 < args.len()).then_some(CommandStart {
+                    index: index + 1,
+                    after_double_dash: true,
+                });
+            }
             "-P"
             | "-F"
             | "-c"
@@ -384,7 +395,12 @@ fn find_command_index(args: &[OsString]) -> Option<usize> {
                         | "--version"
                 ) => {}
             _ if arg.starts_with('-') => {}
-            _ => return Some(index),
+            _ => {
+                return Some(CommandStart {
+                    index,
+                    after_double_dash: false,
+                });
+            }
         }
     }
 
@@ -755,6 +771,20 @@ mod tests {
             vec![
                 OsString::from("comma"),
                 OsString::from("man"),
+                OsString::from("--help")
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_double_dash_is_not_rewritten() {
+        let normalized = normalize_passthrough_args(["comma", "--", "nixos-anywhere", "--help"]);
+        assert_eq!(
+            normalized,
+            vec![
+                OsString::from("comma"),
+                OsString::from("--"),
+                OsString::from("nixos-anywhere"),
                 OsString::from("--help")
             ]
         );
