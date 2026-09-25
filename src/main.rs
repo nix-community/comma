@@ -4,7 +4,7 @@ mod shell;
 
 use std::{
     env,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     io::{self, Write},
     os::unix::prelude::CommandExt,
     path::Path,
@@ -304,6 +304,93 @@ fn confirmer(run_cmd: &Command) -> bool {
     }
 }
 
+fn normalize_passthrough_args<I, T>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString>,
+{
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let Some(command_index) = find_command_index(&args) else {
+        return args;
+    };
+
+    if matches!(args[command_index].to_str(), Some("man")) {
+        return args;
+    }
+
+    let has_special_passthrough_flag = args[command_index + 1..]
+        .iter()
+        .take_while(|arg| arg != &&OsStr::new("--"))
+        .any(|arg| matches!(arg.to_str(), Some("--help" | "-h" | "--version" | "-V")));
+
+    if !has_special_passthrough_flag {
+        return args;
+    }
+
+    let mut normalized = Vec::with_capacity(args.len() + 1);
+    normalized.extend(args[..=command_index].iter().cloned());
+    normalized.push(OsString::from("--"));
+    normalized.extend(args[command_index + 1..].iter().cloned());
+    normalized
+}
+
+fn find_command_index(args: &[OsString]) -> Option<usize> {
+    let mut pending_value = false;
+
+    for (index, arg) in args.iter().enumerate().skip(1) {
+        if pending_value {
+            pending_value = false;
+            continue;
+        }
+
+        let Some(arg) = arg.to_str() else {
+            continue;
+        };
+
+        match arg {
+            "--" => return (index + 1 < args.len()).then_some(index + 1),
+            "-P"
+            | "-F"
+            | "-c"
+            | "--picker"
+            | "--nixpkgs-flake"
+            | "--print-completions"
+            | "--cache-level" => pending_value = true,
+            _ if arg.starts_with("--picker=")
+                || arg.starts_with("--nixpkgs-flake=")
+                || arg.starts_with("--print-completions=")
+                || arg.starts_with("--cache-level=")
+                || (arg.starts_with("-P") && arg.len() > 2)
+                || (arg.starts_with("-F") && arg.len() > 2)
+                || (arg.starts_with("-c") && arg.len() > 2)
+                || matches!(
+                    arg,
+                    "-i" | "--install"
+                        | "-s"
+                        | "--shell"
+                        | "-a"
+                        | "--ask"
+                        | "-p"
+                        | "--print-packages"
+                        | "-x"
+                        | "--print-path"
+                        | "-e"
+                        | "--empty-cache"
+                        | "-d"
+                        | "--delete-entry"
+                        | "-h"
+                        | "--help"
+                        | "-V"
+                        | "--version"
+                ) => {}
+            _ if arg.starts_with('-') => {}
+            _ => return Some(index),
+        }
+    }
+
+    None
+}
+
 fn main() -> ExitCode {
     let bin_name = std::env::args()
         .next()
@@ -323,7 +410,7 @@ fn main() -> ExitCode {
 
     env_logger::init();
 
-    let args = Opt::parse();
+    let args = Opt::parse_from(normalize_passthrough_args(env::args_os()));
 
     if args.mangen {
         use clap::CommandFactory;
@@ -500,12 +587,7 @@ fn main() -> ExitCode {
 }
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
-    generate(
-        generator,
-        cmd,
-        bin_name,
-        &mut io::stdout(),
-    );
+    generate(generator, cmd, bin_name, &mut io::stdout());
 }
 
 /// Runs programs without installing them
@@ -603,8 +685,9 @@ struct ManArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::Opt;
-    use clap::Parser;
+    use super::{normalize_passthrough_args, Opt};
+    use clap::{error::ErrorKind, Parser};
+    use std::ffi::OsString;
 
     #[test]
     fn parses_command_and_trail() {
@@ -631,6 +714,50 @@ mod tests {
     #[test]
     fn missing_command_is_error() {
         assert!(Opt::try_parse_from(["comma"]).is_err());
+    }
+
+    #[test]
+    fn parses_help_after_command_as_trailing_arg() {
+        let opt = Opt::parse_from(normalize_passthrough_args([
+            "comma",
+            "nixos-anywhere",
+            "--help",
+        ]));
+        assert_eq!(opt.command.as_deref(), Some("nixos-anywhere"));
+        assert_eq!(opt.trail, vec!["--help".to_string()]);
+    }
+
+    #[test]
+    fn parses_version_after_command_as_trailing_arg() {
+        let opt = Opt::parse_from(normalize_passthrough_args([
+            "comma",
+            "nixos-anywhere",
+            "--version",
+        ]));
+        assert_eq!(opt.command.as_deref(), Some("nixos-anywhere"));
+        assert_eq!(opt.trail, vec!["--version".to_string()]);
+    }
+
+    #[test]
+    fn top_level_help_is_not_rewritten() {
+        let err = match Opt::try_parse_from(normalize_passthrough_args(["comma", "--help"])) {
+            Ok(_) => panic!("expected --help to remain a top-level clap help request"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), ErrorKind::DisplayHelp);
+    }
+
+    #[test]
+    fn subcommand_help_is_not_rewritten() {
+        let normalized = normalize_passthrough_args(["comma", "man", "--help"]);
+        assert_eq!(
+            normalized,
+            vec![
+                OsString::from("comma"),
+                OsString::from("man"),
+                OsString::from("--help")
+            ]
+        );
     }
 }
 
