@@ -57,6 +57,9 @@ environment variable:
 - `1`: only cache choices
 - `2` (default): also caches paths
 
+Use `, --print-cache` to see the cached choices and paths, `--delete-entry` to
+drop the entry for a command and `--empty-cache` to clear it completely.
+
 Cache for path is the default since it makes subsequent usage of a command much
 faster:
 

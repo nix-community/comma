@@ -73,6 +73,13 @@ impl Cache {
         self.data.0.get(command).cloned()
     }
 
+    /// All cache entries, sorted by command name
+    pub fn entries(&self) -> Vec<(&String, &CacheEntry)> {
+        let mut entries: Vec<_> = self.data.0.iter().collect();
+        entries.sort_by_key(|(command, _)| *command);
+        entries
+    }
+
     pub fn update(&mut self, command: &str, entry: CacheEntry) {
         debug!("updating cache entry for command '{command}': {entry:?}");
         self.data.0.insert(command.into(), entry);

@@ -291,6 +291,19 @@ fn main() -> ExitCode {
         }
     }
 
+    if args.print_cache {
+        return match cache {
+            Some(ref cache) => {
+                print_cache(cache);
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!("The cache is disabled");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     if args.cmd.is_empty() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
@@ -432,6 +445,28 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn print_cache(cache: &Cache) {
+    for (command, entry) in cache.entries() {
+        println!("{command} -> {}", entry.derivation);
+
+        let mut paths: Vec<_> = entry.paths.iter().collect();
+        paths.sort();
+        let width = paths
+            .iter()
+            .map(|(source, _)| source.len())
+            .max()
+            .unwrap_or(0);
+        for (source, path) in paths {
+            let note = if Path::new(path).exists() {
+                ""
+            } else {
+                " (garbage collected)"
+            };
+            println!("  {source:width$}  {path}{note}");
+        }
+    }
+}
+
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
     generate(
         generator,
@@ -492,13 +527,17 @@ struct Opt {
     #[clap(short, long = "empty-cache")]
     empty_cache: bool,
 
+    /// Print the cached package choices and paths, then exit
+    #[clap(long = "print-cache")]
+    print_cache: bool,
+
     /// Overwrite the cache entry for the specified command. This is achieved
     /// by first deleting it from the cache, then running comma as normal
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "print_cache"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
     cmd: Vec<String>,
 
     #[clap(subcommand)]
