@@ -163,8 +163,10 @@ fn get_command_path(
     Some(format!("{base_path}/bin/{command}"))
 }
 
+/// Find the path of `command`. Paths are only read from and written to `cache`
+/// when it is given
 fn get_command_path_from_cache(
-    cache: &mut Option<Cache>,
+    cache: Option<&mut Cache>,
     entry: &CacheEntry,
     use_channel: bool,
     command: &str,
@@ -182,7 +184,9 @@ fn get_command_path_from_cache(
     };
     let source = source.as_str();
 
-    match entry.paths.get(source) {
+    let cached = cache.as_ref().and(entry.paths.get(source));
+
+    match cached {
         // If we have the path for this nixpkgs source in the cache and it is
         // not garbage collected (so the path still exists), it should be safe
         // to use it directly
@@ -195,10 +199,8 @@ fn get_command_path_from_cache(
             let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake)?;
             debug!("found path from nix for command '{command}' using '{source}': {path}");
 
-            if let Some(ref mut cache) = cache {
-                // Start from the stored entry so that paths cached for other
-                // sources are kept even when `entry` had its paths dropped
-                let mut entry = cache.query(command).unwrap_or_else(|| entry.clone());
+            if let Some(cache) = cache {
+                let mut entry = entry.clone();
                 entry.paths.insert(source.to_owned(), path.clone());
                 cache.update(command, entry);
             }
@@ -209,7 +211,7 @@ fn get_command_path_from_cache(
 }
 
 fn run_command_from_cache(
-    cache: &mut Option<Cache>,
+    cache: Option<&mut Cache>,
     entry: &CacheEntry,
     use_channel: bool,
     command: &str,
@@ -359,19 +361,27 @@ fn main() -> ExitCode {
         }),
     };
 
-    let entry = match entry {
-        Some(d) if args.cache_level >= 2 => d,
-        Some(d) => {
-            debug!("cache_level={}, ignoring path from cache", args.cache_level);
-            CacheEntry {
-                derivation: d.derivation.clone(),
-                paths: HashMap::new(),
-            }
-        }
-        None => return ExitCode::FAILURE,
+    let Some(entry) = entry else {
+        return ExitCode::FAILURE;
     };
 
+    // Whether evaluated paths for this command are read from and written to
+    // the cache. Commands listed in COMMA_NO_CACHE_PATH (comma separated) are
+    // always evaluated again, but their package choice is still cached
+    let no_cache_path = env::var("COMMA_NO_CACHE_PATH").unwrap_or_default();
+    let cache_paths =
+        args.cache_level >= 2 && !no_cache_path.split(',').any(|c| c.trim() == command);
+    if !cache_paths {
+        debug!(
+            "cache_level={}, COMMA_NO_CACHE_PATH={no_cache_path:?}: not using cached paths for '{command}'",
+            args.cache_level
+        );
+    }
+
     let basename = entry.derivation.rsplit('.').next_back().unwrap();
+
+    // The cache used for path lookups; the choice is still kept in `cache`
+    let path_cache = cache.as_mut().filter(|_| cache_paths);
 
     // An explicitly given flake (via -F or COMMA_NIXPKGS_FLAKE) takes
     // precedence over <nixpkgs> from NIX_PATH. An empty value counts as not
@@ -401,7 +411,7 @@ fn main() -> ExitCode {
         .exec();
     } else if args.print_path {
         let Some(path) =
-            get_command_path_from_cache(&mut cache, &entry, use_channel, command, nixpkgs_flake)
+            get_command_path_from_cache(path_cache, &entry, use_channel, command, nixpkgs_flake)
         else {
             return ExitCode::FAILURE;
         };
@@ -423,7 +433,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     } else {
         let Some(mut run_cmd) = run_command_from_cache(
-            &mut cache,
+            path_cache,
             &entry,
             use_channel,
             command,
@@ -519,7 +529,9 @@ struct Opt {
     print_path: bool,
 
     /// Configure the cache level. 0 disables the cache, 1 enables cache for
-    /// choices, 2 also caches path evaluations
+    /// choices, 2 also caches path evaluations. Commands listed in the
+    /// COMMA_NO_CACHE_PATH environment variable (comma separated) are treated
+    /// as level 1
     #[clap(long = "cache-level", env = "COMMA_CACHING", default_value_t = 2)]
     cache_level: u8,
 
