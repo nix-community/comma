@@ -34,6 +34,17 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 , cowsay neato
 ```
 
+### Choosing nixpkgs
+
+By default comma uses `<nixpkgs>` from `NIX_PATH` if it is set, otherwise the
+`nixpkgs` flake from the registry. Use `-F`/`--nixpkgs-flake` or the
+`COMMA_NIXPKGS_FLAKE` environment variable to pick another flake; it takes
+precedence over `NIX_PATH`:
+
+```bash
+, -F nixpkgs/nixos-unstable croc --version
+```
+
 ### Cache
 
 Comma supports caching both the choices (i.e., once you select a derivation for
