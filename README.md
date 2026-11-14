@@ -57,6 +57,21 @@ environment variable:
 - `1`: only cache choices
 - `2` (default): also caches paths
 
+To always evaluate the path again for only some commands, while still
+remembering the package choice, list them in the `COMMA_NO_CACHE_PATH`
+environment variable (comma separated). For a single run, `--cache-level 1`
+does the same:
+
+```bash
+export COMMA_NO_CACHE_PATH=yt-dlp,gallery-dl
+```
+
+These commands then always run the version from the nixpkgs comma currently
+uses, which isn't necessarily the newest one. The `nixpkgs` flake follows the
+flake registry; on NixOS it is usually pinned to the system's nixpkgs and only
+changes with `nixos-rebuild`. A `<nixpkgs>` channel only changes when the
+channel is updated.
+
 Use `, --print-cache` to see the cached choices and paths, `--delete-entry` to
 drop the entry for a command and `--empty-cache` to clear it completely.
 
