@@ -21,7 +21,7 @@ use log::{debug, error, trace};
 enum Nixpkgs {
     /// `<nixpkgs>`, which nix resolves through the given NIX_PATH
     Channel { nix_path: String },
-    /// A flake reference, e.g. `nixpkgs` or `nixpkgs/nixos-unstable`
+    /// A flake reference, e.g. `nixpkgs` or `github:nixos/nixpkgs/nixos-unstable`
     Flake(String),
 }
 
@@ -503,7 +503,7 @@ struct Opt {
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
-    /// Nixpkgs flake to use, e.g. `nixpkgs/nixos-unstable` [default: nixpkgs].
+    /// Nixpkgs flake to use, e.g. `github:nixos/nixpkgs/nixos-unstable` [default: nixpkgs].
     /// When given, it takes precedence over `<nixpkgs>` from NIX_PATH
     #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE")]
     nixpkgs_flake: Option<String>,
@@ -594,8 +594,11 @@ mod tests {
 
         // An explicit flake wins over NIX_PATH
         assert_eq!(
-            Nixpkgs::resolve(Some("nixpkgs/nixos-unstable"), nix_path.to_owned()),
-            flake("nixpkgs/nixos-unstable")
+            Nixpkgs::resolve(
+                Some("github:nixos/nixpkgs/nixos-unstable"),
+                nix_path.to_owned()
+            ),
+            flake("github:nixos/nixpkgs/nixos-unstable")
         );
 
         // An empty flake counts as not given
@@ -614,8 +617,8 @@ mod tests {
             "<nixpkgs> (NIX_PATH=nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos)"
         );
         assert_eq!(
-            flake("nixpkgs/nixos-unstable").cache_key(),
-            "nixpkgs/nixos-unstable"
+            flake("github:nixos/nixpkgs/nixos-unstable").cache_key(),
+            "github:nixos/nixpkgs/nixos-unstable"
         );
     }
 }
