@@ -67,9 +67,19 @@ fn decode(bytes: &[u8]) -> Result<CacheData, DecodeError> {
 pub struct CacheEntry {
     pub derivation: String,
     /// Evaluated command paths, keyed by the nixpkgs source (flake ref, or
-    /// `<nixpkgs>` with the NIX_PATH it was resolved through) they were built
-    /// from
+    /// `<nixpkgs>` with the NIX_PATH entry it was resolved through) they were
+    /// built from
     pub paths: HashMap<String, String>,
+}
+
+impl CacheEntry {
+    /// Remember `path` as the command path when built from `source`
+    pub fn set_path(&mut self, source: &str, path: String) {
+        // Nothing else removes the paths of sources that aren't used anymore,
+        // so drop the ones that were garbage collected
+        self.paths.retain(|_, path| Path::new(path).exists());
+        self.paths.insert(source.to_owned(), path);
+    }
 }
 
 /// The path with the home directory replaced by `~`, so that messages
@@ -286,6 +296,31 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn set_path_drops_garbage_collected_paths() {
+        let dir = test_dir("set_path_drops_garbage_collected_paths");
+        let existing = dir.join("existing").display().to_string();
+        let gone = dir.join("gone").display().to_string();
+        let new = dir.join("new").display().to_string();
+        fs::write(&existing, b"").unwrap();
+
+        let mut entry = entry("hello.out");
+        entry.paths.insert("nixpkgs".to_owned(), existing.clone());
+        entry.paths.insert("<nixpkgs> (/old)".to_owned(), gone);
+        // The new path is stored without being checked
+        entry.set_path("<nixpkgs> (/new)", new.clone());
+
+        assert_eq!(
+            entry.paths,
+            HashMap::from([
+                ("nixpkgs".to_owned(), existing),
+                ("<nixpkgs> (/new)".to_owned(), new),
+            ])
+        );
+
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
