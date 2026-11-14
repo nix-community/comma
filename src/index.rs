@@ -22,31 +22,28 @@ pub fn check_database_updated() {
             // If db is not writable, they are responsible for keeping it up to date
             // because if it's part of the nix store, the timestamp will always 1970-01-01.
             return;
-        };
+        }
         if is_database_old(&database_file) {
             eprintln!(
                 "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/nix-community/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
             );
         }
-    };
+    }
 }
 
 /// Get the location of the nix-index database file
 fn get_database_file() -> PathBuf {
-    match env::var("NIX_INDEX_DATABASE") {
-        Ok(db) => {
-            let path = PathBuf::from(db);
-            if path.is_dir() {
-                path.join("files")
-            } else {
-                path
-            }
+    if let Ok(db) = env::var("NIX_INDEX_DATABASE") {
+        let path = PathBuf::from(db);
+        if path.is_dir() {
+            path.join("files")
+        } else {
+            path
         }
-        Err(_) => {
-            let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
-            let cache_dir = base.get_cache_home();
-            cache_dir.join("files")
-        }
+    } else {
+        let base = xdg::BaseDirectories::with_prefix("nix-index").unwrap();
+        let cache_dir = base.get_cache_home();
+        cache_dir.join("files")
     }
 }
 
@@ -62,6 +59,6 @@ fn is_database_old(database_file: &Path) -> bool {
         .elapsed()
         .unwrap_or(Duration::new(0, 0));
 
-    time_since_modified > Duration::from_secs(30 * 24 * 60 * 60)
+    time_since_modified > Duration::from_hours(720)
         && !metadata.permissions().readonly()
 }

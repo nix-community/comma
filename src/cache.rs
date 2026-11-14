@@ -17,7 +17,7 @@ struct CacheData(HashMap<String, CacheEntry>);
 pub struct CacheEntry {
     pub derivation: String,
     /// Evaluated command paths, keyed by the nixpkgs source (flake ref, or
-    /// `<nixpkgs>` with the NIX_PATH entry it was resolved through) they were
+    /// `<nixpkgs>` with the `NIX_PATH` entry it was resolved through) they were
     /// built from
     pub paths: HashMap<String, String>,
 }

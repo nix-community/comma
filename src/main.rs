@@ -19,15 +19,15 @@ use log::{debug, error, trace};
 /// The nixpkgs that packages are built from
 #[derive(Debug, PartialEq)]
 enum Nixpkgs {
-    /// `<nixpkgs>`, which nix resolves through the given NIX_PATH
+    /// `<nixpkgs>`, which nix resolves through the given `NIX_PATH`
     Channel { nix_path: String },
     /// A flake reference, e.g. `nixpkgs` or `github:nixos/nixpkgs/nixos-unstable`
     Flake(String),
 }
 
 impl Nixpkgs {
-    /// An explicitly given flake (via -F or COMMA_NIXPKGS_FLAKE) takes
-    /// precedence over `<nixpkgs>` from NIX_PATH
+    /// An explicitly given flake (via -F or `COMMA_NIXPKGS_FLAKE`) takes
+    /// precedence over `<nixpkgs>` from `NIX_PATH`
     fn from_args(explicit_flake: Option<&str>) -> Self {
         Self::resolve(explicit_flake, env::var("NIX_PATH").unwrap_or_default())
     }
@@ -52,7 +52,7 @@ impl Nixpkgs {
     }
 
     /// The key that paths built from this nixpkgs are cached under.
-    /// `<nixpkgs>` is resolved through NIX_PATH, so the key contains the
+    /// `<nixpkgs>` is resolved through `NIX_PATH`, so the key contains the
     /// entry that provides it. Other entries don't matter: changing
     /// `nixos-config=` shouldn't make comma evaluate every command again
     fn cache_key(&self) -> String {
@@ -66,7 +66,7 @@ impl Nixpkgs {
     }
 }
 
-/// Whether nix treats `s` as a URL in NIX_PATH, like `isPseudoUrl` in nix
+/// Whether nix treats `s` as a URL in `NIX_PATH`, like `isPseudoUrl` in nix
 fn is_pseudo_url(s: &str) -> bool {
     s.starts_with("channel:")
         || s.split_once("://").is_some_and(|(scheme, _)| {
@@ -77,7 +77,7 @@ fn is_pseudo_url(s: &str) -> bool {
         })
 }
 
-/// Split NIX_PATH into its entries the way nix does (`parseNixPath`).
+/// Split `NIX_PATH` into its entries the way nix does (`parseNixPath`).
 /// Entries are separated by `:`, but the first `:` of a value like
 /// `https://...`, `channel:nixos-unstable` or `flake:nixpkgs` belongs to the
 /// value. Empty entries are left out, they don't show up in
@@ -113,7 +113,7 @@ fn split_nix_path(nix_path: &str) -> Vec<&str> {
 }
 
 /// The value of the `nixpkgs=` entry of `nix_path` that `<nixpkgs>` resolves
-/// to. `None` if it can't be told from NIX_PATH alone: nix uses the first
+/// to. `None` if it can't be told from `NIX_PATH` alone: nix uses the first
 /// entry that has the path, and an entry without a name, a plain directory,
 /// has it if it contains a `nixpkgs` directory
 fn nixpkgs_entry(nix_path: &str) -> Option<&str> {
@@ -182,7 +182,7 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
             .expect("fail")
             .trim()
             .split('\n')
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .collect(),
     )
 }
@@ -218,7 +218,7 @@ fn run_command_or_open_shell(
         if !trail.is_empty() {
             run_cmd.args(trail);
         }
-    };
+    }
 
     trace!("run nix command arguments: {run_cmd:?}");
 
@@ -380,15 +380,12 @@ fn main() -> ExitCode {
     }
 
     if args.print_cache {
-        return match cache {
-            Some(ref cache) => {
-                print_cache(cache);
-                ExitCode::SUCCESS
-            }
-            None => {
-                eprintln!("The cache is disabled");
-                ExitCode::FAILURE
-            }
+        return if let Some(ref cache) = cache {
+            print_cache(cache);
+            ExitCode::SUCCESS
+        } else {
+            eprintln!("The cache is disabled");
+            ExitCode::FAILURE
         };
     }
 
@@ -570,7 +567,7 @@ struct Opt {
     picker: String,
 
     /// Nixpkgs flake to use, e.g. `github:nixos/nixpkgs/nixos-unstable` [default: nixpkgs].
-    /// When given, it takes precedence over `<nixpkgs>` from NIX_PATH
+    /// When given, it takes precedence over `<nixpkgs>` from `NIX_PATH`
     #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE")]
     nixpkgs_flake: Option<String>,
 
@@ -592,7 +589,7 @@ struct Opt {
 
     /// Configure the cache level. 0 disables the cache, 1 enables cache for
     /// choices, 2 also caches path evaluations. Commands listed in the
-    /// COMMA_NO_CACHE_PATH environment variable (comma separated) are treated
+    /// `COMMA_NO_CACHE_PATH` environment variable (comma separated) are treated
     /// as level 1
     #[clap(long = "cache-level", env = "COMMA_CACHING", default_value_t = 2)]
     cache_level: u8,
