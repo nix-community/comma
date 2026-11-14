@@ -52,13 +52,79 @@ impl Nixpkgs {
     }
 
     /// The key that paths built from this nixpkgs are cached under.
-    /// `<nixpkgs>` is resolved through NIX_PATH, so that is part of the key
+    /// `<nixpkgs>` is resolved through NIX_PATH, so the key contains the
+    /// entry that provides it. Other entries don't matter: changing
+    /// `nixos-config=` shouldn't make comma evaluate every command again
     fn cache_key(&self) -> String {
         match self {
-            Self::Channel { nix_path } => format!("<nixpkgs> (NIX_PATH={nix_path})"),
+            Self::Channel { nix_path } => match nixpkgs_entry(nix_path) {
+                Some(value) => format!("<nixpkgs> ({value})"),
+                None => format!("<nixpkgs> (NIX_PATH={nix_path})"),
+            },
             Self::Flake(flake) => flake.clone(),
         }
     }
+}
+
+/// Whether nix treats `s` as a URL in NIX_PATH, like `isPseudoUrl` in nix
+fn is_pseudo_url(s: &str) -> bool {
+    s.starts_with("channel:")
+        || s.split_once("://").is_some_and(|(scheme, _)| {
+            matches!(
+                scheme,
+                "http" | "https" | "file" | "channel" | "git" | "s3" | "ssh"
+            )
+        })
+}
+
+/// Split NIX_PATH into its entries the way nix does (`parseNixPath`).
+/// Entries are separated by `:`, but the first `:` of a value like
+/// `https://...`, `channel:nixos-unstable` or `flake:nixpkgs` belongs to the
+/// value. Empty entries are left out, they don't show up in
+/// `builtins.nixPath` either
+fn split_nix_path(nix_path: &str) -> Vec<&str> {
+    let mut entries = Vec::new();
+    let mut rest = nix_path;
+
+    while !rest.is_empty() {
+        let Some(colon) = rest.find(':') else {
+            entries.push(rest);
+            break;
+        };
+
+        // Like nix, look at everything after the `=` of this entry, which
+        // may reach into the entries that follow
+        let value = &rest[rest[..colon].rfind('=').map_or(0, |i| i + 1)..];
+        let end = if is_pseudo_url(value) || value.starts_with("flake:") {
+            rest[colon + 1..]
+                .find(':')
+                .map_or(rest.len(), |i| colon + 1 + i)
+        } else {
+            colon
+        };
+
+        if end > 0 {
+            entries.push(&rest[..end]);
+        }
+        rest = rest.get(end + 1..).unwrap_or_default();
+    }
+
+    entries
+}
+
+/// The value of the `nixpkgs=` entry of `nix_path` that `<nixpkgs>` resolves
+/// to. `None` if it can't be told from NIX_PATH alone: nix uses the first
+/// entry that has the path, and an entry without a name, a plain directory,
+/// has it if it contains a `nixpkgs` directory
+fn nixpkgs_entry(nix_path: &str) -> Option<&str> {
+    split_nix_path(nix_path)
+        .into_iter()
+        .find_map(|entry| match entry.split_once('=') {
+            Some(("nixpkgs", value)) => Some(Some(value)),
+            Some(_) => None,
+            None => Some(None),
+        })
+        .flatten()
 }
 
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
@@ -222,7 +288,7 @@ fn get_command_path_from_cache(
 
             if let Some(cache) = cache {
                 let mut entry = entry.clone();
-                entry.paths.insert(source.to_owned(), path.clone());
+                entry.set_path(source, path.clone());
                 cache.update(command, entry);
             }
 
@@ -608,13 +674,81 @@ mod tests {
         );
     }
 
-    // Cached paths are stored under these keys, so changing them invalidates
-    // the paths in existing caches
+    #[test]
+    fn nix_path_entries() {
+        // (NIX_PATH, its entries, the value `<nixpkgs>` resolves to)
+        let cases: &[(&str, &[&str], Option<&str>)] = &[
+            (
+                "nixos-config=/etc/nixos/configuration.nix:nixpkgs=/nix/nixpkgs:/nix/channels",
+                &[
+                    "nixos-config=/etc/nixos/configuration.nix",
+                    "nixpkgs=/nix/nixpkgs",
+                    "/nix/channels",
+                ],
+                Some("/nix/nixpkgs"),
+            ),
+            // The first `:` of these values doesn't end the entry
+            (
+                "nixpkgs=https://example.org/nixpkgs.tar.gz:nixos-config=/etc/nixos",
+                &[
+                    "nixpkgs=https://example.org/nixpkgs.tar.gz",
+                    "nixos-config=/etc/nixos",
+                ],
+                Some("https://example.org/nixpkgs.tar.gz"),
+            ),
+            (
+                "nixpkgs=channel:nixos-unstable:nixos-config=/etc/nixos",
+                &["nixpkgs=channel:nixos-unstable", "nixos-config=/etc/nixos"],
+                Some("channel:nixos-unstable"),
+            ),
+            (
+                "nixos-config=/etc/nixos:nixpkgs=flake:nixpkgs",
+                &["nixos-config=/etc/nixos", "nixpkgs=flake:nixpkgs"],
+                Some("flake:nixpkgs"),
+            ),
+            // Empty entries are left out
+            (
+                ":nixos-config=/etc/nixos::nixpkgs=/nix/nixpkgs:",
+                &["nixos-config=/etc/nixos", "nixpkgs=/nix/nixpkgs"],
+                Some("/nix/nixpkgs"),
+            ),
+            // A directory before the entry may contain `nixpkgs`
+            (
+                "/nix/channels:nixpkgs=/nix/nixpkgs",
+                &["/nix/channels", "nixpkgs=/nix/nixpkgs"],
+                None,
+            ),
+            // The first of several entries is used
+            (
+                "nixpkgs=/first:nixpkgs=/second",
+                &["nixpkgs=/first", "nixpkgs=/second"],
+                Some("/first"),
+            ),
+            // No entry for nixpkgs
+            ("mynixpkgs=/x", &["mynixpkgs=/x"], None),
+        ];
+
+        for (nix_path, entries, nixpkgs) in cases {
+            assert_eq!(split_nix_path(nix_path), *entries, "{nix_path}");
+            assert_eq!(nixpkgs_entry(nix_path), *nixpkgs, "{nix_path}");
+        }
+    }
+
     #[test]
     fn nixpkgs_cache_key() {
+        // Only the entry for nixpkgs is part of the key
         assert_eq!(
             channel("nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos").cache_key(),
-            "<nixpkgs> (NIX_PATH=nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos)"
+            channel("nixos-config=/other:nixpkgs=/nix/nixpkgs").cache_key(),
+        );
+        assert_eq!(
+            channel("nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos").cache_key(),
+            "<nixpkgs> (/nix/nixpkgs)"
+        );
+        // The whole NIX_PATH, when that entry can't be told
+        assert_eq!(
+            channel("/nix/channels:nixpkgs=/nix/nixpkgs").cache_key(),
+            "<nixpkgs> (NIX_PATH=/nix/channels:nixpkgs=/nix/nixpkgs)"
         );
         assert_eq!(
             flake("github:nixos/nixpkgs/nixos-unstable").cache_key(),
