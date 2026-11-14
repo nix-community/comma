@@ -3,6 +3,7 @@ mod index;
 mod shell;
 
 use std::{
+    collections::HashMap,
     env,
     io::{self, Write},
     os::unix::prelude::CommandExt,
@@ -118,7 +119,12 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
-fn get_command_path(use_channel: bool, choice: &str, command: &str, nixpkgs_flake: &str) -> String {
+fn get_command_path(
+    use_channel: bool,
+    choice: &str,
+    command: &str,
+    nixpkgs_flake: &str,
+) -> Option<String> {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -143,14 +149,18 @@ fn get_command_path(use_channel: bool, choice: &str, command: &str, nixpkgs_flak
     // It is safe to assume that only one path will be printed because
     // nix-locate appends the output to the derivation name
     // (e.g., firefox.out instead of firefox)
-    let output = result.wait_with_output().unwrap().stdout;
-    let base_path = std::str::from_utf8(&output)
+    let output = result.wait_with_output().unwrap();
+    if !output.status.success() {
+        error!("nix build failed for '{choice}'");
+        return None;
+    }
+    let base_path = std::str::from_utf8(&output.stdout)
         .unwrap_or_else(|err| panic!("nix outputted invalid UTF-8: {err}"))
         .trim();
 
     // It is safe to assume that command is in $out/bin/{command} from
     // the derivation, since this was already filtered by nix-locate
-    format!("{base_path}/bin/{command}")
+    Some(format!("{base_path}/bin/{command}"))
 }
 
 fn get_command_path_from_cache(
@@ -159,36 +169,42 @@ fn get_command_path_from_cache(
     use_channel: bool,
     command: &str,
     nixpkgs_flake: &str,
-) -> String {
-    match &entry.path {
-        // If we have the path in the cache and it is not garbage collected
-        // (so the path still exists), it should be safe to use it directly
-        Some(path) if Path::new(&path).exists() => {
-            debug!("found path from cache for command '{command}': {path}");
-            path.to_owned()
+) -> Option<String> {
+    // The nixpkgs the path is built from, used as the key for cached paths.
+    // <nixpkgs> is resolved through NIX_PATH, so include it in the key
+    let source = if use_channel {
+        format!(
+            "<nixpkgs> (NIX_PATH={})",
+            env::var("NIX_PATH").unwrap_or_default()
+        )
+    } else {
+        nixpkgs_flake.to_owned()
+    };
+    let source = source.as_str();
+
+    match entry.paths.get(source) {
+        // If we have the path for this nixpkgs source in the cache and it is
+        // not garbage collected (so the path still exists), it should be safe
+        // to use it directly
+        Some(path) if Path::new(path).exists() => {
+            debug!("found path from cache for command '{command}' using '{source}': {path}");
+            Some(path.to_owned())
         }
         // Otherwise, we need to find the command path
-        _ => match cache {
-            Some(ref mut cache) => {
-                let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
-                debug!("found path from nix for command '{command}': {path}");
+        _ => {
+            let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake)?;
+            debug!("found path from nix for command '{command}' using '{source}': {path}");
 
-                let entry = CacheEntry {
-                    path: Some(path.clone()),
-                    ..entry.clone()
-                };
+            if let Some(ref mut cache) = cache {
+                // Start from the stored entry so that paths cached for other
+                // sources are kept even when `entry` had its paths dropped
+                let mut entry = cache.query(command).unwrap_or_else(|| entry.clone());
+                entry.paths.insert(source.to_owned(), path.clone());
                 cache.update(command, entry);
-
-                path
             }
 
-            None => {
-                let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake);
-                debug!("found path from nix for command '{command}': {path}");
-
-                path
-            }
-        },
+            Some(path)
+        }
     }
 }
 
@@ -199,8 +215,8 @@ fn run_command_from_cache(
     command: &str,
     trail: &[String],
     nixpkgs_flake: &str,
-) -> Command {
-    let path = get_command_path_from_cache(cache, entry, use_channel, command, nixpkgs_flake);
+) -> Option<Command> {
+    let path = get_command_path_from_cache(cache, entry, use_channel, command, nixpkgs_flake)?;
 
     let mut run_cmd = Command::new(path);
     if !trail.is_empty() {
@@ -209,7 +225,7 @@ fn run_command_from_cache(
 
     trace!("run command from cache arguments: {run_cmd:?}");
 
-    run_cmd
+    Some(run_cmd)
 }
 
 fn confirmer(run_cmd: &Command) -> bool {
@@ -275,6 +291,19 @@ fn main() -> ExitCode {
         }
     }
 
+    if args.print_cache {
+        return match cache {
+            Some(ref cache) => {
+                print_cache(cache);
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!("The cache is disabled");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     if args.cmd.is_empty() && args.subcmds.is_none() {
         return if args.empty_cache {
             ExitCode::SUCCESS
@@ -318,7 +347,7 @@ fn main() -> ExitCode {
             index_database_pick(command, &args.picker).map(|derivation| {
                 let entry = CacheEntry {
                     derivation,
-                    path: None,
+                    paths: HashMap::new(),
                 };
                 cache.update(command, entry.clone());
                 entry
@@ -326,7 +355,7 @@ fn main() -> ExitCode {
         }),
         None => index_database_pick(command, &args.picker).map(|derivation| CacheEntry {
             derivation,
-            path: None,
+            paths: HashMap::new(),
         }),
     };
 
@@ -336,7 +365,7 @@ fn main() -> ExitCode {
             debug!("cache_level={}, ignoring path from cache", args.cache_level);
             CacheEntry {
                 derivation: d.derivation.clone(),
-                path: None,
+                paths: HashMap::new(),
             }
         }
         None => return ExitCode::FAILURE,
@@ -344,9 +373,16 @@ fn main() -> ExitCode {
 
     let basename = entry.derivation.rsplit('.').next_back().unwrap();
 
-    let use_channel = env::var("NIX_PATH")
-        .unwrap_or_default()
-        .contains("nixpkgs=");
+    // An explicitly given flake (via -F or COMMA_NIXPKGS_FLAKE) takes
+    // precedence over <nixpkgs> from NIX_PATH. An empty value counts as not
+    // given, so `COMMA_NIXPKGS_FLAKE=` doesn't turn into the flake in the
+    // current directory
+    let explicit_flake = args.nixpkgs_flake.as_deref().filter(|s| !s.is_empty());
+    let use_channel = explicit_flake.is_none()
+        && env::var("NIX_PATH")
+            .unwrap_or_default()
+            .contains("nixpkgs=");
+    let nixpkgs_flake = explicit_flake.unwrap_or("nixpkgs");
 
     if args.install {
         let _ = Command::new("nix-env")
@@ -360,17 +396,15 @@ fn main() -> ExitCode {
             &entry.derivation,
             &shell_cmd,
             &[],
-            &args.nixpkgs_flake,
+            nixpkgs_flake,
         )
         .exec();
     } else if args.print_path {
-        let path = get_command_path_from_cache(
-            &mut cache,
-            &entry,
-            use_channel,
-            command,
-            &args.nixpkgs_flake,
-        );
+        let Some(path) =
+            get_command_path_from_cache(&mut cache, &entry, use_channel, command, nixpkgs_flake)
+        else {
+            return ExitCode::FAILURE;
+        };
         println!("{path}");
     } else if args.subcmds.is_some() {
         // Open manpage via
@@ -380,7 +414,7 @@ fn main() -> ExitCode {
             &entry.derivation.replace(".out", "^*"),
             "man",
             &[command],
-            &args.nixpkgs_flake,
+            nixpkgs_flake,
         )
         .exec();
 
@@ -388,14 +422,16 @@ fn main() -> ExitCode {
         eprintln!("{err:?}");
         return ExitCode::FAILURE;
     } else {
-        let mut run_cmd = run_command_from_cache(
+        let Some(mut run_cmd) = run_command_from_cache(
             &mut cache,
             &entry,
             use_channel,
             command,
             trail,
-            &args.nixpkgs_flake,
-        );
+            nixpkgs_flake,
+        ) else {
+            return ExitCode::FAILURE;
+        };
 
         // Drop cache before calling exec() to make sure that
         // the cache file is written
@@ -407,6 +443,28 @@ fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+fn print_cache(cache: &Cache) {
+    for (command, entry) in cache.entries() {
+        println!("{command} -> {}", entry.derivation);
+
+        let mut paths: Vec<_> = entry.paths.iter().collect();
+        paths.sort();
+        let width = paths
+            .iter()
+            .map(|(source, _)| source.len())
+            .max()
+            .unwrap_or(0);
+        for (source, path) in paths {
+            let note = if Path::new(path).exists() {
+                ""
+            } else {
+                " (garbage collected)"
+            };
+            println!("  {source:width$}  {path}{note}");
+        }
+    }
 }
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
@@ -439,14 +497,10 @@ struct Opt {
     #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
     picker: String,
 
-    /// Nixpkgs flake to use
-    #[clap(
-        short = 'F',
-        long,
-        env = "COMMA_NIXPKGS_FLAKE",
-        default_value = "nixpkgs"
-    )]
-    nixpkgs_flake: String,
+    /// Nixpkgs flake to use, e.g. `nixpkgs/nixos-unstable` [default: nixpkgs].
+    /// When given, it takes precedence over `<nixpkgs>` from NIX_PATH
+    #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE")]
+    nixpkgs_flake: Option<String>,
 
     /// Ask to confirm the program that will be run.
     #[clap(short, long, env = "COMMA_ASK_TO_CONFIRM")]
@@ -473,13 +527,17 @@ struct Opt {
     #[clap(short, long = "empty-cache")]
     empty_cache: bool,
 
+    /// Print the cached package choices and paths, then exit
+    #[clap(long = "print-cache")]
+    print_cache: bool,
+
     /// Overwrite the cache entry for the specified command. This is achieved
     /// by first deleting it from the cache, then running comma as normal
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
     /// Command to run
-    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
+    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "print_cache"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
     cmd: Vec<String>,
 
     #[clap(subcommand)]
