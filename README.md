@@ -42,7 +42,7 @@ By default comma uses `<nixpkgs>` from `NIX_PATH` if it is set, otherwise the
 precedence over `NIX_PATH`:
 
 ```bash
-, -F nixpkgs/nixos-unstable croc --version
+, -F github:nixos/nixpkgs/nixos-unstable croc --version
 ```
 
 ### Cache
