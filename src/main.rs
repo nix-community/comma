@@ -16,6 +16,51 @@ use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
 use log::{debug, error, trace};
 
+/// The nixpkgs that packages are built from
+#[derive(Debug, PartialEq)]
+enum Nixpkgs {
+    /// `<nixpkgs>`, which nix resolves through the given NIX_PATH
+    Channel { nix_path: String },
+    /// A flake reference, e.g. `nixpkgs` or `nixpkgs/nixos-unstable`
+    Flake(String),
+}
+
+impl Nixpkgs {
+    /// An explicitly given flake (via -F or COMMA_NIXPKGS_FLAKE) takes
+    /// precedence over `<nixpkgs>` from NIX_PATH
+    fn from_args(explicit_flake: Option<&str>) -> Self {
+        Self::resolve(explicit_flake, env::var("NIX_PATH").unwrap_or_default())
+    }
+
+    fn resolve(explicit_flake: Option<&str>, nix_path: String) -> Self {
+        // An empty value counts as not given, so `COMMA_NIXPKGS_FLAKE=`
+        // doesn't turn into the flake in the current directory
+        match explicit_flake.filter(|s| !s.is_empty()) {
+            Some(flake) => Self::Flake(flake.to_owned()),
+            None if nix_path.contains("nixpkgs=") => Self::Channel { nix_path },
+            None => Self::Flake("nixpkgs".to_owned()),
+        }
+    }
+
+    /// The arguments that make `nix shell` or `nix build` use `attr` from
+    /// this nixpkgs
+    fn installable_args(&self, attr: &str) -> Vec<String> {
+        match self {
+            Self::Channel { .. } => vec!["-f".to_owned(), "<nixpkgs>".to_owned(), attr.to_owned()],
+            Self::Flake(flake) => vec![format!("{flake}#{attr}")],
+        }
+    }
+
+    /// The key that paths built from this nixpkgs are cached under.
+    /// `<nixpkgs>` is resolved through NIX_PATH, so that is part of the key
+    fn cache_key(&self) -> String {
+        match self {
+            Self::Channel { nix_path } => format!("<nixpkgs> (NIX_PATH={nix_path})"),
+            Self::Flake(flake) => flake.clone(),
+        }
+    }
+}
+
 fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     let mut picker_process = Command::new(picker)
         .stdin(Stdio::piped())
@@ -87,11 +132,10 @@ fn index_database_pick(command: &str, picker: &str) -> Option<String> {
 }
 
 fn run_command_or_open_shell(
-    use_channel: bool,
+    nixpkgs: &Nixpkgs,
     choice: &str,
     command: &str,
     trail: &[&str],
-    nixpkgs_flake: &str,
 ) -> Command {
     let mut run_cmd = Command::new("nix");
 
@@ -101,11 +145,7 @@ fn run_command_or_open_shell(
         "shell",
     ]);
 
-    if use_channel {
-        run_cmd.args(["-f", "<nixpkgs>", choice]);
-    } else {
-        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
-    }
+    run_cmd.args(nixpkgs.installable_args(choice));
 
     if !command.is_empty() {
         run_cmd.args(["--command", command]);
@@ -119,12 +159,7 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
-fn get_command_path(
-    use_channel: bool,
-    choice: &str,
-    command: &str,
-    nixpkgs_flake: &str,
-) -> Option<String> {
+fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
     let mut run_cmd = Command::new("nix");
 
     run_cmd.args([
@@ -135,11 +170,7 @@ fn get_command_path(
         "--no-link",
     ]);
 
-    if use_channel {
-        run_cmd.args(["-f", "<nixpkgs>", choice]);
-    } else {
-        run_cmd.args([format!("{nixpkgs_flake}#{choice}")]);
-    }
+    run_cmd.args(nixpkgs.installable_args(choice));
 
     let result = run_cmd
         .stdout(Stdio::piped())
@@ -168,20 +199,10 @@ fn get_command_path(
 fn get_command_path_from_cache(
     cache: Option<&mut Cache>,
     entry: &CacheEntry,
-    use_channel: bool,
+    nixpkgs: &Nixpkgs,
     command: &str,
-    nixpkgs_flake: &str,
 ) -> Option<String> {
-    // The nixpkgs the path is built from, used as the key for cached paths.
-    // <nixpkgs> is resolved through NIX_PATH, so include it in the key
-    let source = if use_channel {
-        format!(
-            "<nixpkgs> (NIX_PATH={})",
-            env::var("NIX_PATH").unwrap_or_default()
-        )
-    } else {
-        nixpkgs_flake.to_owned()
-    };
+    let source = nixpkgs.cache_key();
     let source = source.as_str();
 
     let cached = cache.as_ref().and(entry.paths.get(source));
@@ -196,7 +217,7 @@ fn get_command_path_from_cache(
         }
         // Otherwise, we need to find the command path
         _ => {
-            let path = get_command_path(use_channel, &entry.derivation, command, nixpkgs_flake)?;
+            let path = get_command_path(nixpkgs, &entry.derivation, command)?;
             debug!("found path from nix for command '{command}' using '{source}': {path}");
 
             if let Some(cache) = cache {
@@ -213,12 +234,11 @@ fn get_command_path_from_cache(
 fn run_command_from_cache(
     cache: Option<&mut Cache>,
     entry: &CacheEntry,
-    use_channel: bool,
+    nixpkgs: &Nixpkgs,
     command: &str,
     trail: &[String],
-    nixpkgs_flake: &str,
 ) -> Option<Command> {
-    let path = get_command_path_from_cache(cache, entry, use_channel, command, nixpkgs_flake)?;
+    let path = get_command_path_from_cache(cache, entry, nixpkgs, command)?;
 
     let mut run_cmd = Command::new(path);
     if !trail.is_empty() {
@@ -383,16 +403,7 @@ fn main() -> ExitCode {
     // The cache used for path lookups; the choice is still kept in `cache`
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
-    // An explicitly given flake (via -F or COMMA_NIXPKGS_FLAKE) takes
-    // precedence over <nixpkgs> from NIX_PATH. An empty value counts as not
-    // given, so `COMMA_NIXPKGS_FLAKE=` doesn't turn into the flake in the
-    // current directory
-    let explicit_flake = args.nixpkgs_flake.as_deref().filter(|s| !s.is_empty());
-    let use_channel = explicit_flake.is_none()
-        && env::var("NIX_PATH")
-            .unwrap_or_default()
-            .contains("nixpkgs=");
-    let nixpkgs_flake = explicit_flake.unwrap_or("nixpkgs");
+    let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
 
     if args.install {
         let _ = Command::new("nix-env")
@@ -401,18 +412,9 @@ fn main() -> ExitCode {
     } else if args.shell {
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        let _ = run_command_or_open_shell(
-            use_channel,
-            &entry.derivation,
-            &shell_cmd,
-            &[],
-            nixpkgs_flake,
-        )
-        .exec();
+        let _ = run_command_or_open_shell(&nixpkgs, &entry.derivation, &shell_cmd, &[]).exec();
     } else if args.print_path {
-        let Some(path) =
-            get_command_path_from_cache(path_cache, &entry, use_channel, command, nixpkgs_flake)
-        else {
+        let Some(path) = get_command_path_from_cache(path_cache, &entry, &nixpkgs, command) else {
             return ExitCode::FAILURE;
         };
         println!("{path}");
@@ -420,11 +422,10 @@ fn main() -> ExitCode {
         // Open manpage via
         // nix shell nixpkgs#drvName --command man commandName
         let err = run_command_or_open_shell(
-            use_channel,
+            &nixpkgs,
             &entry.derivation.replace(".out", "^*"),
             "man",
             &[command],
-            nixpkgs_flake,
         )
         .exec();
 
@@ -432,14 +433,9 @@ fn main() -> ExitCode {
         eprintln!("{err:?}");
         return ExitCode::FAILURE;
     } else {
-        let Some(mut run_cmd) = run_command_from_cache(
-            path_cache,
-            &entry,
-            use_channel,
-            command,
-            trail,
-            nixpkgs_flake,
-        ) else {
+        let Some(mut run_cmd) =
+            run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
+        else {
             return ExitCode::FAILURE;
         };
 
@@ -570,4 +566,56 @@ struct ManArgs {
     /// Command to show manpage for
     #[clap(required = true, name = "cmd", trailing_var_arg = true)]
     cmd: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(nix_path: &str) -> Nixpkgs {
+        Nixpkgs::Channel {
+            nix_path: nix_path.to_owned(),
+        }
+    }
+
+    fn flake(flake: &str) -> Nixpkgs {
+        Nixpkgs::Flake(flake.to_owned())
+    }
+
+    #[test]
+    fn nixpkgs_resolve() {
+        let nix_path = "nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos";
+
+        assert_eq!(
+            Nixpkgs::resolve(None, nix_path.to_owned()),
+            channel(nix_path)
+        );
+        assert_eq!(Nixpkgs::resolve(None, String::new()), flake("nixpkgs"));
+
+        // An explicit flake wins over NIX_PATH
+        assert_eq!(
+            Nixpkgs::resolve(Some("nixpkgs/nixos-unstable"), nix_path.to_owned()),
+            flake("nixpkgs/nixos-unstable")
+        );
+
+        // An empty flake counts as not given
+        assert_eq!(
+            Nixpkgs::resolve(Some(""), nix_path.to_owned()),
+            channel(nix_path)
+        );
+    }
+
+    // Cached paths are stored under these keys, so changing them invalidates
+    // the paths in existing caches
+    #[test]
+    fn nixpkgs_cache_key() {
+        assert_eq!(
+            channel("nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos").cache_key(),
+            "<nixpkgs> (NIX_PATH=nixpkgs=/nix/nixpkgs:nixos-config=/etc/nixos)"
+        );
+        assert_eq!(
+            flake("nixpkgs/nixos-unstable").cache_key(),
+            "nixpkgs/nixos-unstable"
+        );
+    }
 }
