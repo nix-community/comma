@@ -1,5 +1,6 @@
 mod cache;
 mod index;
+mod install;
 mod shell;
 
 use std::{
@@ -711,14 +712,17 @@ fn main() -> ExitCode {
         );
     }
 
-    let basename = entry.derivation.rsplit('.').next_back().unwrap();
-
     // The cache used for path lookups; the choice is still kept in `cache`
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
     if args.install {
         let mut run_cmd = Command::new("nix-env");
-        run_cmd.args(["-f", "<nixpkgs>", "-iA", basename]);
+        run_cmd.args([
+            "-f",
+            "<nixpkgs>",
+            "-iA",
+            install::package_attr(&entry.derivation),
+        ]);
 
         exec(run_cmd, cache)
     } else if args.print_path {
