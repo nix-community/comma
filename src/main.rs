@@ -5,7 +5,8 @@ mod shell;
 use std::{
     collections::HashMap,
     env,
-    io::{self, Write},
+    fs::OpenOptions,
+    io::{self, BufRead, BufReader, Write},
     os::unix::prelude::CommandExt,
     path::Path,
     process::{self, Command, ExitCode, Stdio},
@@ -187,13 +188,15 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
     )
 }
 
-fn index_database_pick(command: &str, picker: &str) -> Option<String> {
+/// The package that provides `command`, and whether the user chose it in the
+/// picker. The picker is only shown when there are several packages
+fn index_database_pick(command: &str, picker: &str) -> Option<(String, bool)> {
     let attrs = index_database(command)?;
 
     if attrs.len() > 1 {
-        pick(picker, &attrs)
+        pick(picker, &attrs).map(|attr| (attr, true))
     } else {
-        attrs.first().map(|s| s.trim().to_owned())
+        attrs.first().map(|s| (s.trim().to_owned(), false))
     }
 }
 
@@ -316,22 +319,58 @@ fn run_command_from_cache(
     Some(run_cmd)
 }
 
-fn confirmer(run_cmd: &Command) -> bool {
+/// The exit status when the user declined to run the command. It is what a
+/// shell gives for a command that wasn't found, so that after a declined
+/// command-not-found `typo && other` doesn't go on to run `other`
+const EXIT_NOT_RUN: u8 = 127;
+
+/// Ask whether to run `command` from the package `derivation`, with the
+/// question written to `output` and the answer read from `input`. This is
+/// asked before the package is built, so its store path isn't known yet
+fn confirm(
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+    command: &str,
+    derivation: &str,
+) -> io::Result<bool> {
     loop {
-        print!("Run '{}'? [Y/n]: ", run_cmd.get_program().display());
-        io::stdout().flush().unwrap();
+        write!(output, "Run '{command}' from '{derivation}'? [Y/n]: ")?;
+        output.flush()?;
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        let mut answer = String::new();
+        if input.read_line(&mut answer)? == 0 {
+            // The input ended without an answer (Ctrl-D). Only an empty line
+            // means yes. End the line of the question, as Enter would have
+            writeln!(output)?;
+            return Ok(false);
+        }
 
-        match input.trim().to_lowercase().as_str() {
-            "y" | "yes" | "" => return true,
-            "n" | "no" => return false,
-            _ => {
-                println!("Please enter 'y' or 'n'.");
-            }
+        match answer.trim().to_lowercase().as_str() {
+            "y" | "yes" | "" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            _ => writeln!(output, "Please enter 'y' or 'n'.")?,
         }
     }
+}
+
+/// Ask on the terminal whether to run `command` from the package
+/// `derivation`. Without a terminal to ask on, the answer is no
+fn confirmer(command: &str, derivation: &str) -> bool {
+    // stdin and stdout belong to the command and may be pipes
+    // (`cat file | cmd`, `cmd | less`), and a command-not-found handler may
+    // capture stdout. So ask on the terminal itself, like ssh and sudo do
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .and_then(|tty| confirm(&mut BufReader::new(&tty), &mut &tty, command, derivation))
+        .unwrap_or_else(|err| {
+            eprintln!(
+                "comma: not running '{command}' from '{derivation}': \
+                 can't ask for confirmation on the terminal: {err}"
+            );
+            false
+        })
 }
 
 fn main() -> ExitCode {
@@ -427,25 +466,23 @@ fn main() -> ExitCode {
         }
     }
 
-    let entry = match cache {
-        Some(ref mut cache) => cache.query(command).or_else(|| {
-            index_database_pick(command, &args.picker).map(|derivation| {
-                let entry = CacheEntry {
-                    derivation,
-                    paths: HashMap::new(),
-                };
-                cache.update(command, entry.clone());
-                entry
-            })
-        }),
-        None => index_database_pick(command, &args.picker).map(|derivation| CacheEntry {
+    // `picked` is whether the user chose the package in the picker just now,
+    // rather than it being the only one or remembered in the cache
+    let cached = cache.as_ref().and_then(|cache| cache.query(command));
+    let (entry, picked) = if let Some(entry) = cached {
+        (entry, false)
+    } else {
+        let Some((derivation, picked)) = index_database_pick(command, &args.picker) else {
+            return ExitCode::FAILURE;
+        };
+        let entry = CacheEntry {
             derivation,
             paths: HashMap::new(),
-        }),
-    };
-
-    let Some(entry) = entry else {
-        return ExitCode::FAILURE;
+        };
+        if let Some(cache) = cache.as_mut() {
+            cache.update(command, entry.clone());
+        }
+        (entry, picked)
     };
 
     // Whether evaluated paths for this command are read from and written to
@@ -496,6 +533,12 @@ fn main() -> ExitCode {
         eprintln!("{err:?}");
         return ExitCode::FAILURE;
     } else {
+        // Ask before the package is built or downloaded. Choosing it in the
+        // picker was already the confirmation
+        if args.ask && !picked && !confirmer(command, &entry.derivation) {
+            return ExitCode::from(EXIT_NOT_RUN);
+        }
+
         let Some(mut run_cmd) =
             run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
         else {
@@ -505,10 +548,7 @@ fn main() -> ExitCode {
         // Drop cache before calling exec() to make sure that
         // the cache file is written
         drop(cache);
-        let answer = if args.ask { confirmer(&run_cmd) } else { true };
-        if answer {
-            let _ = run_cmd.exec();
-        }
+        let _ = run_cmd.exec();
     }
 
     ExitCode::SUCCESS
@@ -571,7 +611,10 @@ struct Opt {
     #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE")]
     nixpkgs_flake: Option<String>,
 
-    /// Ask to confirm the program that will be run.
+    /// Ask to confirm the program that will be run, before its package is
+    /// downloaded. Not asked right after choosing the package in the picker.
+    /// The question is asked on the terminal; without one the program isn't
+    /// run. When it isn't run, comma exits with status 127
     #[clap(short, long, env = "COMMA_ASK_TO_CONFIRM")]
     ask: bool,
 
@@ -643,6 +686,32 @@ mod tests {
 
     fn flake(flake: &str) -> Nixpkgs {
         Nixpkgs::Flake(flake.to_owned())
+    }
+
+    /// The result of `confirm` for the given input, and what it wrote
+    fn confirm_with(input: &str) -> (bool, String) {
+        let mut output = Vec::new();
+        let answer = confirm(&mut input.as_bytes(), &mut output, "sl", "sl.out").unwrap();
+        (answer, String::from_utf8(output).unwrap())
+    }
+
+    #[test]
+    fn confirm_answers() {
+        let question = "Run 'sl' from 'sl.out'? [Y/n]: ";
+
+        // An empty line is the default, yes
+        assert_eq!(confirm_with("y\n"), (true, question.to_owned()));
+        assert_eq!(confirm_with("\n"), (true, question.to_owned()));
+        assert_eq!(confirm_with("n\n"), (false, question.to_owned()));
+
+        // Without an answer the program isn't run
+        assert_eq!(confirm_with(""), (false, format!("{question}\n")));
+
+        // Asked again after anything else
+        assert_eq!(
+            confirm_with("maybe\ny\n"),
+            (true, format!("{question}Please enter 'y' or 'n'.\n{question}"))
+        );
     }
 
     #[test]
