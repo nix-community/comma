@@ -66,6 +66,5 @@ fn is_database_old(database_file: &Path) -> bool {
         .elapsed()
         .unwrap_or(Duration::new(0, 0));
 
-    time_since_modified > Duration::from_hours(720)
-        && !metadata.permissions().readonly()
+    time_since_modified > Duration::from_hours(720) && !metadata.permissions().readonly()
 }

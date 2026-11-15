@@ -610,7 +610,11 @@ fn main() -> ExitCode {
         eprintln!("Generating completion file for {shell}...");
         let bin_name = std::env::args()
             .next()
-            .and_then(|p| Path::new(&p).file_name().map(|f| f.to_string_lossy().into_owned()))
+            .and_then(|p| {
+                Path::new(&p)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| "comma".into());
         print_completions(shell, &mut cmd, &bin_name);
         return ExitCode::SUCCESS;
@@ -774,12 +778,7 @@ fn print_cache(cache: &Cache) {
 }
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
-    generate(
-        generator,
-        cmd,
-        bin_name,
-        &mut io::stdout(),
-    );
+    generate(generator, cmd, bin_name, &mut io::stdout());
 }
 
 /// Runs programs without installing them
@@ -909,7 +908,10 @@ mod tests {
         // Asked again after anything else
         assert_eq!(
             confirm_with("maybe\ny\n"),
-            (true, format!("{question}Please enter 'y' or 'n'.\n{question}"))
+            (
+                true,
+                format!("{question}Please enter 'y' or 'n'.\n{question}")
+            )
         );
     }
 
