@@ -57,6 +57,21 @@ impl Nixpkgs {
         }
     }
 
+    /// The arguments that make `nix-env` use this nixpkgs. It doesn't take a
+    /// flake, but `-f flake:...` is the source of one, which for nixpkgs is
+    /// the same as `<nixpkgs>` of a channel
+    fn nix_env_args(&self) -> Vec<String> {
+        match self {
+            Self::Channel { .. } => vec!["-f".to_owned(), "<nixpkgs>".to_owned()],
+            Self::Flake(flake) => vec![
+                "--extra-experimental-features".to_owned(),
+                "flakes".to_owned(),
+                "-f".to_owned(),
+                format!("flake:{flake}"),
+            ],
+        }
+    }
+
     /// The key that paths built from this nixpkgs are cached under.
     /// `<nixpkgs>` is resolved through `NIX_PATH`, so the key contains the
     /// entry that provides it. Other entries don't matter: changing
@@ -716,15 +731,10 @@ fn main() -> ExitCode {
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
     if args.install {
-        let mut run_cmd = Command::new("nix-env");
-        run_cmd.args([
-            "-f",
-            "<nixpkgs>",
-            "-iA",
-            install::package_attr(&entry.derivation),
-        ]);
+        let install_cmd =
+            install::install_command(&nixpkgs, install::package_attr(&entry.derivation));
 
-        exec(run_cmd, cache)
+        exec(install_cmd, cache)
     } else if args.print_path {
         let Some(path) = get_command_path_from_cache(path_cache, &entry, &nixpkgs, command) else {
             return ExitCode::FAILURE;
