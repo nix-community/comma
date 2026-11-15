@@ -1,6 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::Once,
     time::{Duration, SystemTime},
 };
 
@@ -14,21 +15,27 @@ pub fn check_database_exists() -> Result<(), ()> {
     Ok(())
 }
 
-/// Prints a warning if the nix-index database is out of date.
+/// Prints a warning if the nix-index database is out of date. Only the first
+/// call does anything, so that the warning is printed once when several
+/// commands are looked up
 pub fn check_database_updated() {
-    let database_file = get_database_file();
-    if check_database_exists().is_ok() {
-        if database_file.metadata().unwrap().permissions().readonly() {
-            // If db is not writable, they are responsible for keeping it up to date
-            // because if it's part of the nix store, the timestamp will always 1970-01-01.
-            return;
+    static CHECKED: Once = Once::new();
+
+    CHECKED.call_once(|| {
+        let database_file = get_database_file();
+        if check_database_exists().is_ok() {
+            if database_file.metadata().unwrap().permissions().readonly() {
+                // If db is not writable, they are responsible for keeping it up to date
+                // because if it's part of the nix store, the timestamp will always 1970-01-01.
+                return;
+            }
+            if is_database_old(&database_file) {
+                eprintln!(
+                    "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/nix-community/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
+                );
+            }
         }
-        if is_database_old(&database_file) {
-            eprintln!(
-                "Warning: Nix-index database is older than 30 days, either obtain a prebuilt database from https://github.com/nix-community/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`."
-            );
-        }
-    }
+    });
 }
 
 /// Get the location of the nix-index database file

@@ -43,12 +43,16 @@ impl Nixpkgs {
         }
     }
 
-    /// The arguments that make `nix shell` or `nix build` use `attr` from
+    /// The arguments that make `nix shell` or `nix build` use `attrs` from
     /// this nixpkgs
-    fn installable_args(&self, attr: &str) -> Vec<String> {
+    fn installable_args(&self, attrs: &[&str]) -> Vec<String> {
         match self {
-            Self::Channel { .. } => vec!["-f".to_owned(), "<nixpkgs>".to_owned(), attr.to_owned()],
-            Self::Flake(flake) => vec![format!("{flake}#{attr}")],
+            Self::Channel { .. } => ["-f", "<nixpkgs>"]
+                .iter()
+                .chain(attrs)
+                .map(|&arg| arg.to_owned())
+                .collect(),
+            Self::Flake(flake) => attrs.iter().map(|attr| format!("{flake}#{attr}")).collect(),
         }
     }
 
@@ -154,55 +158,107 @@ fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     )
 }
 
-fn index_database(command: &str) -> Option<Box<[String]>> {
-    index::check_database_updated();
-
+/// The packages in the nix-index database that have `command`, or the
+/// reason why there are none
+fn locate(command: &str) -> Result<Box<[String]>, String> {
     let nix_locate_output = Command::new("nix-locate")
         .args(["--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{command}"))
         .output()
-        .expect("failed to execute nix-locate");
+        .map_err(|err| format!("failed to execute nix-locate: {err}"))?;
 
     if !nix_locate_output.status.success() {
-        match std::str::from_utf8(&nix_locate_output.stderr) {
-            Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
-            Err(_) => eprintln!("nix-locate failed"),
-        }
-        return None;
+        return Err(match std::str::from_utf8(&nix_locate_output.stderr) {
+            Ok(stderr) => format!("nix-locate failed with: {stderr}"),
+            Err(_) => "nix-locate failed".to_owned(),
+        });
     }
 
     let attrs = nix_locate_output.stdout;
 
     if attrs.is_empty() {
-        eprintln!("No executable `{command}` found in nix-index database.");
-        return None;
+        return Err(format!(
+            "No executable `{command}` found in nix-index database."
+        ));
     }
 
-    Some(
-        std::str::from_utf8(&attrs)
-            .expect("fail")
-            .trim()
-            .split('\n')
-            .map(std::borrow::ToOwned::to_owned)
-            .collect(),
-    )
+    Ok(std::str::from_utf8(&attrs)
+        .expect("fail")
+        .trim()
+        .split('\n')
+        .map(std::borrow::ToOwned::to_owned)
+        .collect())
+}
+
+fn index_database(command: &str) -> Option<Box<[String]>> {
+    index::check_database_updated();
+
+    locate(command).inspect_err(|err| eprintln!("{err}")).ok()
+}
+
+/// What is known about the package of a command before the user is asked
+enum Found {
+    /// The choice that is remembered in the cache
+    Remembered(CacheEntry),
+    /// The packages in the index that provide the command
+    InIndex(Box<[String]>),
+}
+
+/// Look `command` up in `cache` and, when it isn't remembered there, in the
+/// index
+fn find_command(cache: Option<&Cache>, command: &str) -> Option<Found> {
+    match cache.and_then(|cache| cache.query(command)) {
+        Some(entry) => Some(Found::Remembered(entry)),
+        None => index_database(command).map(Found::InIndex),
+    }
+}
+
+/// The package for `command` out of what was `found` for it, and whether the
+/// user chose it in the picker just now, rather than it being the only one or
+/// remembered in the cache. The picker is only shown when there are several
+/// packages. A package from the index is remembered in `cache`
+fn choose_entry(
+    cache: Option<&mut Cache>,
+    command: &str,
+    found: &Found,
+    picker: &str,
+) -> Option<(CacheEntry, bool)> {
+    let attrs = match found {
+        Found::Remembered(entry) => return Some((entry.clone(), false)),
+        Found::InIndex(attrs) => attrs,
+    };
+
+    let (derivation, chosen) = if attrs.len() > 1 {
+        (pick(picker, attrs)?, true)
+    } else {
+        (attrs.first()?.trim().to_owned(), false)
+    };
+    let entry = CacheEntry {
+        derivation,
+        paths: HashMap::new(),
+    };
+    if let Some(cache) = cache {
+        cache.update(command, entry.clone());
+    }
+    Some((entry, chosen))
 }
 
 /// The package that provides `command`, and whether the user chose it in the
-/// picker. The picker is only shown when there are several packages
-fn index_database_pick(command: &str, picker: &str) -> Option<(String, bool)> {
-    let attrs = index_database(command)?;
-
-    if attrs.len() > 1 {
-        pick(picker, &attrs).map(|attr| (attr, true))
-    } else {
-        attrs.first().map(|s| (s.trim().to_owned(), false))
-    }
+/// picker just now
+fn find_entry(
+    cache: Option<&mut Cache>,
+    command: &str,
+    picker: &str,
+) -> Option<(CacheEntry, bool)> {
+    let found = find_command(cache.as_deref(), command)?;
+    choose_entry(cache, command, &found, picker)
 }
 
+/// `nix shell` with the packages `choices`, running `command` with the
+/// arguments `trail` in it
 fn run_command_or_open_shell(
     nixpkgs: &Nixpkgs,
-    choice: &str,
+    choices: &[&str],
     command: &str,
     trail: &[&str],
 ) -> Command {
@@ -214,7 +270,7 @@ fn run_command_or_open_shell(
         "shell",
     ]);
 
-    run_cmd.args(nixpkgs.installable_args(choice));
+    run_cmd.args(nixpkgs.installable_args(choices));
 
     if !command.is_empty() {
         run_cmd.args(["--command", command]);
@@ -228,6 +284,166 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
+/// The exit statuses a shell gives for a command that wasn't found, and for
+/// one that was found but couldn't be executed
+const EXIT_NOT_FOUND: u8 = 127;
+const EXIT_NOT_EXECUTABLE: u8 = 126;
+
+/// The exit status for `program`, which couldn't be executed because of
+/// `err`. These are the ones a shell gives, so that this can be told apart
+/// from the program itself failing
+fn exec_failure_status(program: &Path, err: &io::Error) -> u8 {
+    // A program that exists is "not found" when its interpreter is missing
+    // (the one after `#!`, or the ELF loader). A shell says for that, that
+    // the program couldn't be executed. A name without a directory is
+    // searched in PATH, so it really wasn't found
+    let exists = program.is_absolute() && program.exists();
+
+    if err.kind() == io::ErrorKind::NotFound && !exists {
+        EXIT_NOT_FOUND
+    } else {
+        EXIT_NOT_EXECUTABLE
+    }
+}
+
+/// Replace this process with `cmd`. Only returns if that failed. Destructors
+/// don't run when it succeeds, so `cache` is taken and dropped first, which
+/// writes the cache file
+fn exec(mut cmd: Command, cache: Option<Cache>) -> ExitCode {
+    drop(cache);
+
+    let err = cmd.exec();
+    eprintln!(
+        "comma: failed to execute '{}': {err}",
+        cmd.get_program().to_string_lossy()
+    );
+    ExitCode::from(exec_failure_status(Path::new(cmd.get_program()), &err))
+}
+
+/// The commands whose packages go in the shell, each of them once: with
+/// --shell every argument is a command
+fn shell_commands(args: &Opt) -> Vec<&str> {
+    let mut given: Vec<&str> = args.cmd.iter().map(String::as_str).collect();
+
+    // `man` in front of the other commands was parsed as the subcommand
+    if let Some(SubCmds::Man(ManArgs { cmd })) = &args.subcmds {
+        given.push("man");
+        given.extend(cmd.iter().map(String::as_str));
+    }
+
+    let mut commands = Vec::new();
+    for command in given {
+        if !commands.contains(&command) {
+            commands.push(command);
+        }
+    }
+    commands
+}
+
+/// The package that a command is run from in a shell with `packages`, when
+/// that isn't the package `chosen` for it. The packages come first in PATH in
+/// their order, so another one of the `providers`, the packages that have the
+/// command, wins when it is before the chosen one.
+///
+/// That is the order since nix 2.20:
+/// <https://github.com/nixos/nix/commit/f4454aac9f002c33b84bb52e0bba2a46ea6170cd>.
+/// Before it, `nix shell` put every package in front of the ones before it,
+/// so the last one won. With such a nix this is wrong about which package a
+/// command is run from
+fn shadowing_package<'a>(
+    packages: &[&'a str],
+    chosen: &str,
+    providers: &[String],
+) -> Option<&'a str> {
+    packages
+        .iter()
+        .copied()
+        .take_while(|package| *package != chosen)
+        .find(|package| providers.iter().any(|provider| provider == package))
+}
+
+/// Warn about the `commands` that aren't run from the package `chosen` for
+/// them in a shell with `packages`
+fn warn_about_shadowed(commands: &[&str], found: &[Found], chosen: &[String], packages: &[&str]) {
+    for ((command, found), chosen) in commands.iter().zip(found).zip(chosen) {
+        // Nothing is before the first package
+        if packages.first() == Some(&chosen.as_str()) {
+            continue;
+        }
+
+        // The index wasn't looked at for a remembered choice. When that
+        // doesn't work now, there is nothing to warn about
+        let providers = match found {
+            Found::InIndex(attrs) => attrs.clone(),
+            Found::Remembered(_) => locate(command).unwrap_or_default(),
+        };
+
+        if let Some(package) = shadowing_package(packages, chosen, &providers) {
+            eprintln!(
+                "Warning: '{command}' in the shell is the one from '{package}', \
+                 which comes before '{chosen}' in PATH."
+            );
+        }
+    }
+}
+
+/// Open a shell that has the packages of all the commands given in `args`
+fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCode {
+    let commands = shell_commands(args);
+
+    // All the commands are looked up before the package of any of them is
+    // asked for, so that the commands that don't exist are reported right
+    // away, all of them, and not after the pickers of the commands before
+    // them. With --delete-entry the remembered choices aren't used
+    let remembered = cache.as_ref().filter(|_| !args.delete_entry);
+    let found: Vec<Option<Found>> = commands
+        .iter()
+        .map(|command| find_command(remembered, command))
+        .collect();
+    let Some(found) = found.into_iter().collect::<Option<Vec<Found>>>() else {
+        return ExitCode::FAILURE;
+    };
+
+    // Only now, so that the choices aren't forgotten for nothing when a
+    // command doesn't exist
+    if args.delete_entry {
+        if let Some(cache) = cache.as_mut() {
+            for command in &commands {
+                cache.delete(command);
+            }
+        }
+    }
+
+    let mut chosen: Vec<String> = Vec::new();
+    for (command, found) in commands.iter().zip(&found) {
+        // The picker only shows the packages. With a single command it is
+        // clear what they are for
+        if commands.len() > 1 && matches!(found, Found::InIndex(attrs) if attrs.len() > 1) {
+            eprintln!("Choose the package for '{command}':");
+        }
+        let Some((entry, _)) = choose_entry(cache.as_mut(), command, found, &args.picker) else {
+            return ExitCode::FAILURE;
+        };
+        chosen.push(entry.derivation);
+    }
+
+    // The same package may provide several of the commands
+    let mut derivations: Vec<&str> = Vec::new();
+    for package in &chosen {
+        if !derivations.contains(&package.as_str()) {
+            derivations.push(package);
+        }
+    }
+
+    warn_about_shadowed(&commands, &found, &chosen, &derivations);
+
+    // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
+    let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
+    let run_cmd = run_command_or_open_shell(nixpkgs, &derivations, &shell_cmd, &[]);
+
+    exec(run_cmd, cache)
+}
+
 fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
     let mut run_cmd = Command::new("nix");
 
@@ -239,7 +455,7 @@ fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<St
         "--no-link",
     ]);
 
-    run_cmd.args(nixpkgs.installable_args(choice));
+    run_cmd.args(nixpkgs.installable_args(&[choice]));
 
     let result = run_cmd
         .stdout(Stdio::piped())
@@ -322,7 +538,7 @@ fn run_command_from_cache(
 /// The exit status when the user declined to run the command. It is what a
 /// shell gives for a command that wasn't found, so that after a declined
 /// command-not-found `typo && other` doesn't go on to run `other`
-const EXIT_NOT_RUN: u8 = 127;
+const EXIT_NOT_RUN: u8 = EXIT_NOT_FOUND;
 
 /// Ask whether to run `command` from the package `derivation`, with the
 /// question written to `output` and the answer read from `input`. This is
@@ -436,6 +652,14 @@ fn main() -> ExitCode {
         };
     }
 
+    let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
+
+    // --shell is a mode of its own: it takes several commands, where
+    // everything below is about a single one
+    if args.shell {
+        return open_shell(&args, cache, &nixpkgs);
+    }
+
     let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
         (&cmd[0], &cmd[1..])
     } else {
@@ -466,23 +690,8 @@ fn main() -> ExitCode {
         }
     }
 
-    // `picked` is whether the user chose the package in the picker just now,
-    // rather than it being the only one or remembered in the cache
-    let cached = cache.as_ref().and_then(|cache| cache.query(command));
-    let (entry, picked) = if let Some(entry) = cached {
-        (entry, false)
-    } else {
-        let Some((derivation, picked)) = index_database_pick(command, &args.picker) else {
-            return ExitCode::FAILURE;
-        };
-        let entry = CacheEntry {
-            derivation,
-            paths: HashMap::new(),
-        };
-        if let Some(cache) = cache.as_mut() {
-            cache.update(command, entry.clone());
-        }
-        (entry, picked)
+    let Some((entry, picked)) = find_entry(cache.as_mut(), command, &args.picker) else {
+        return ExitCode::FAILURE;
     };
 
     // Whether evaluated paths for this command are read from and written to
@@ -503,35 +712,29 @@ fn main() -> ExitCode {
     // The cache used for path lookups; the choice is still kept in `cache`
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
-    let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
-
     if args.install {
-        let _ = Command::new("nix-env")
-            .args(["-f", "<nixpkgs>", "-iA", basename])
-            .exec();
-    } else if args.shell {
-        // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
-        let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        let _ = run_command_or_open_shell(&nixpkgs, &entry.derivation, &shell_cmd, &[]).exec();
+        let mut run_cmd = Command::new("nix-env");
+        run_cmd.args(["-f", "<nixpkgs>", "-iA", basename]);
+
+        exec(run_cmd, cache)
     } else if args.print_path {
         let Some(path) = get_command_path_from_cache(path_cache, &entry, &nixpkgs, command) else {
             return ExitCode::FAILURE;
         };
         println!("{path}");
+
+        ExitCode::SUCCESS
     } else if args.subcmds.is_some() {
         // Open manpage via
         // nix shell nixpkgs#drvName --command man commandName
-        let err = run_command_or_open_shell(
+        let run_cmd = run_command_or_open_shell(
             &nixpkgs,
-            &entry.derivation.replace(".out", "^*"),
+            &[&entry.derivation.replace(".out", "^*")],
             "man",
             &[command],
-        )
-        .exec();
+        );
 
-        // This code will only run if an error occurs launching
-        eprintln!("{err:?}");
-        return ExitCode::FAILURE;
+        exec(run_cmd, cache)
     } else {
         // Ask before the package is built or downloaded. Choosing it in the
         // picker was already the confirmation
@@ -539,19 +742,13 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_NOT_RUN);
         }
 
-        let Some(mut run_cmd) =
-            run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
+        let Some(run_cmd) = run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
         else {
             return ExitCode::FAILURE;
         };
 
-        // Drop cache before calling exec() to make sure that
-        // the cache file is written
-        drop(cache);
-        let _ = run_cmd.exec();
+        exec(run_cmd, cache)
     }
-
-    ExitCode::SUCCESS
 }
 
 fn print_cache(cache: &Cache) {
@@ -598,8 +795,9 @@ struct Opt {
     #[clap(short, long)]
     install: bool,
 
-    /// Open a shell containing the derivation containing the executable
-    #[clap(short, long)]
+    /// Open a shell containing the derivations containing the executables.
+    /// Every argument is an executable, e.g. `, -s cowsay lolcat`
+    #[clap(short, long, conflicts_with_all = ["install", "print_packages", "print_path"])]
     shell: bool,
 
     /// Picker to use
@@ -650,7 +848,8 @@ struct Opt {
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
-    /// Command to run
+    /// Command to run, followed by its arguments. With `--shell`, the
+    /// commands whose packages go in the shell
     #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "print_cache"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
     cmd: Vec<String>,
 
@@ -712,6 +911,76 @@ mod tests {
             confirm_with("maybe\ny\n"),
             (true, format!("{question}Please enter 'y' or 'n'.\n{question}"))
         );
+    }
+
+    #[test]
+    fn exec_failure_statuses() {
+        let not_found = io::Error::from(io::ErrorKind::NotFound);
+
+        // A name is searched in PATH, whatever is in the current directory
+        assert_eq!(exec_failure_status(Path::new("src"), &not_found), 127);
+        assert_eq!(
+            exec_failure_status(Path::new("/no/such/program"), &not_found),
+            127
+        );
+        // It exists, so what wasn't found is its interpreter
+        assert_eq!(exec_failure_status(Path::new("/"), &not_found), 126);
+    }
+
+    #[test]
+    fn nixpkgs_installable_args() {
+        assert_eq!(
+            channel("nixpkgs=/nix/nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
+            ["-f", "<nixpkgs>", "cowsay.out", "lolcat.out"]
+        );
+        assert_eq!(
+            flake("nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
+            ["nixpkgs#cowsay.out", "nixpkgs#lolcat.out"]
+        );
+    }
+
+    #[test]
+    fn shell_commands_are_all_arguments() {
+        let commands = |args: &[&str]| {
+            let args = Opt::try_parse_from([&[","], args].concat()).unwrap();
+            shell_commands(&args)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(commands(&["-s", "cowsay", "lolcat"]), ["cowsay", "lolcat"]);
+        // --shell is a flag, so it can be combined with other short flags
+        assert_eq!(commands(&["-sd", "cowsay"]), ["cowsay"]);
+        // A command that is given twice is there once
+        assert_eq!(
+            commands(&["-s", "cowsay", "lolcat", "cowsay"]),
+            ["cowsay", "lolcat"]
+        );
+        // `man` is a command like the others, also in front of them, where
+        // it is parsed as the subcommand
+        assert_eq!(commands(&["-s", "cowsay", "man"]), ["cowsay", "man"]);
+        assert_eq!(
+            commands(&["-s", "man", "cowsay", "lolcat"]),
+            ["man", "cowsay", "lolcat"]
+        );
+    }
+
+    #[test]
+    fn shadowing_packages() {
+        let packages = ["xz.bin", "busybox.out", "lolcat.out"];
+        let xz = ["xz.bin".to_owned(), "busybox.out".to_owned()];
+        let lolcat = ["lolcat.out".to_owned()];
+
+        // xz.bin has xz too and is before busybox.out
+        assert_eq!(
+            shadowing_package(&packages, "busybox.out", &xz),
+            Some("xz.bin")
+        );
+        // The chosen package is before the other one that has it
+        assert_eq!(shadowing_package(&packages, "xz.bin", &xz), None);
+        // No other package has it
+        assert_eq!(shadowing_package(&packages, "lolcat.out", &lolcat), None);
     }
 
     #[test]
