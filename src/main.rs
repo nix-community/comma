@@ -192,31 +192,43 @@ fn index_database(command: &str) -> Option<Box<[String]>> {
     )
 }
 
-/// The package that provides `command`, and whether the user chose it in the
-/// picker. The picker is only shown when there are several packages
-fn index_database_pick(command: &str, picker: &str) -> Option<(String, bool)> {
-    let attrs = index_database(command)?;
+/// What is known about the package of a command before the user is asked
+enum Found {
+    /// The choice that is remembered in the cache
+    Remembered(CacheEntry),
+    /// The packages in the index that provide the command
+    InIndex(Box<[String]>),
+}
 
-    if attrs.len() > 1 {
-        pick(picker, &attrs).map(|attr| (attr, true))
-    } else {
-        attrs.first().map(|s| (s.trim().to_owned(), false))
+/// Look `command` up in `cache` and, when it isn't remembered there, in the
+/// index
+fn find_command(cache: Option<&Cache>, command: &str) -> Option<Found> {
+    match cache.and_then(|cache| cache.query(command)) {
+        Some(entry) => Some(Found::Remembered(entry)),
+        None => index_database(command).map(Found::InIndex),
     }
 }
 
-/// The package that provides `command`, and whether the user chose it in the
-/// picker just now, rather than it being the only one or remembered in the
-/// cache. A package found in the index is remembered in `cache`
-fn find_entry(
+/// The package for `command` out of what was `found` for it, and whether the
+/// user chose it in the picker just now, rather than it being the only one or
+/// remembered in the cache. The picker is only shown when there are several
+/// packages. A package from the index is remembered in `cache`
+fn choose_entry(
     cache: Option<&mut Cache>,
     command: &str,
+    found: &Found,
     picker: &str,
 ) -> Option<(CacheEntry, bool)> {
-    if let Some(entry) = cache.as_ref().and_then(|cache| cache.query(command)) {
-        return Some((entry, false));
-    }
+    let attrs = match found {
+        Found::Remembered(entry) => return Some((entry.clone(), false)),
+        Found::InIndex(attrs) => attrs,
+    };
 
-    let (derivation, chosen) = index_database_pick(command, picker)?;
+    let (derivation, chosen) = if attrs.len() > 1 {
+        (pick(picker, attrs)?, true)
+    } else {
+        (attrs.first()?.trim().to_owned(), false)
+    };
     let entry = CacheEntry {
         derivation,
         paths: HashMap::new(),
@@ -225,6 +237,17 @@ fn find_entry(
         cache.update(command, entry.clone());
     }
     Some((entry, chosen))
+}
+
+/// The package that provides `command`, and whether the user chose it in the
+/// picker just now
+fn find_entry(
+    cache: Option<&mut Cache>,
+    command: &str,
+    picker: &str,
+) -> Option<(CacheEntry, bool)> {
+    let found = find_command(cache.as_deref(), command)?;
+    choose_entry(cache, command, &found, picker)
 }
 
 /// `nix shell` with the packages `choices`, running `command` with the
@@ -317,6 +340,21 @@ fn shell_commands(args: &Opt) -> Vec<&str> {
 fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCode {
     let commands = shell_commands(args);
 
+    // All the commands are looked up before the package of any of them is
+    // asked for, so that the commands that don't exist are reported right
+    // away, all of them, and not after the pickers of the commands before
+    // them. With --delete-entry the remembered choices aren't used
+    let remembered = cache.as_ref().filter(|_| !args.delete_entry);
+    let found: Vec<Option<Found>> = commands
+        .iter()
+        .map(|command| find_command(remembered, command))
+        .collect();
+    let Some(found) = found.into_iter().collect::<Option<Vec<Found>>>() else {
+        return ExitCode::FAILURE;
+    };
+
+    // Only now, so that the choices aren't forgotten for nothing when a
+    // command doesn't exist
     if args.delete_entry {
         if let Some(cache) = cache.as_mut() {
             for command in &commands {
@@ -327,8 +365,8 @@ fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCo
 
     // The same package may provide several of the commands
     let mut derivations: Vec<String> = Vec::new();
-    for command in &commands {
-        let Some((entry, _)) = find_entry(cache.as_mut(), command, &args.picker) else {
+    for (command, found) in commands.iter().zip(&found) {
+        let Some((entry, _)) = choose_entry(cache.as_mut(), command, found, &args.picker) else {
             return ExitCode::FAILURE;
         };
         if !derivations.contains(&entry.derivation) {
