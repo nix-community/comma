@@ -366,6 +366,11 @@ fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCo
     // The same package may provide several of the commands
     let mut derivations: Vec<String> = Vec::new();
     for (command, found) in commands.iter().zip(&found) {
+        // The picker only shows the packages. With a single command it is
+        // clear what they are for
+        if commands.len() > 1 && matches!(found, Found::InIndex(attrs) if attrs.len() > 1) {
+            eprintln!("Choose the package for '{command}':");
+        }
         let Some((entry, _)) = choose_entry(cache.as_mut(), command, found, &args.picker) else {
             return ExitCode::FAILURE;
         };
