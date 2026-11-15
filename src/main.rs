@@ -293,6 +293,57 @@ fn exec(mut cmd: Command, cache: Option<Cache>) -> ExitCode {
     ExitCode::from(exec_failure_status(Path::new(cmd.get_program()), &err))
 }
 
+/// The commands whose packages go in the shell, each of them once: with
+/// --shell every argument is a command
+fn shell_commands(args: &Opt) -> Vec<&str> {
+    let mut given: Vec<&str> = args.cmd.iter().map(String::as_str).collect();
+
+    // `man` in front of the other commands was parsed as the subcommand
+    if let Some(SubCmds::Man(ManArgs { cmd })) = &args.subcmds {
+        given.push("man");
+        given.extend(cmd.iter().map(String::as_str));
+    }
+
+    let mut commands = Vec::new();
+    for command in given {
+        if !commands.contains(&command) {
+            commands.push(command);
+        }
+    }
+    commands
+}
+
+/// Open a shell that has the packages of all the commands given in `args`
+fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCode {
+    let commands = shell_commands(args);
+
+    if args.delete_entry {
+        if let Some(cache) = cache.as_mut() {
+            for command in &commands {
+                cache.delete(command);
+            }
+        }
+    }
+
+    // The same package may provide several of the commands
+    let mut derivations: Vec<String> = Vec::new();
+    for command in &commands {
+        let Some((entry, _)) = find_entry(cache.as_mut(), command, &args.picker) else {
+            return ExitCode::FAILURE;
+        };
+        if !derivations.contains(&entry.derivation) {
+            derivations.push(entry.derivation);
+        }
+    }
+    let derivations: Vec<&str> = derivations.iter().map(String::as_str).collect();
+
+    // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
+    let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
+    let run_cmd = run_command_or_open_shell(nixpkgs, &derivations, &shell_cmd, &[]);
+
+    exec(run_cmd, cache)
+}
+
 fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
     let mut run_cmd = Command::new("nix");
 
@@ -501,22 +552,23 @@ fn main() -> ExitCode {
         };
     }
 
+    let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
+
+    // --shell is a mode of its own: it takes several commands, where
+    // everything below is about a single one
+    if args.shell {
+        return open_shell(&args, cache, &nixpkgs);
+    }
+
     let (command, trail) = if let Some(SubCmds::Man(ManArgs { ref cmd })) = args.subcmds {
         (&cmd[0], &cmd[1..])
     } else {
         (&args.cmd[0], &args.cmd[1..])
     };
 
-    // With --shell every argument is a command, and the packages of all of
-    // them go in the shell
-    let extra_commands = if args.shell { trail } else { &[] };
-
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
             cache.delete(command);
-            for extra_command in extra_commands {
-                cache.delete(extra_command);
-            }
         }
     }
 
@@ -560,29 +612,9 @@ fn main() -> ExitCode {
     // The cache used for path lookups; the choice is still kept in `cache`
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
-    let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
-
     if args.install {
         let mut run_cmd = Command::new("nix-env");
         run_cmd.args(["-f", "<nixpkgs>", "-iA", basename]);
-
-        exec(run_cmd, cache)
-    } else if args.shell {
-        // The same package may provide several of the commands
-        let mut derivations = vec![entry.derivation];
-        for extra_command in extra_commands {
-            let Some((entry, _)) = find_entry(cache.as_mut(), extra_command, &args.picker) else {
-                return ExitCode::FAILURE;
-            };
-            if !derivations.contains(&entry.derivation) {
-                derivations.push(entry.derivation);
-            }
-        }
-        let derivations: Vec<&str> = derivations.iter().map(String::as_str).collect();
-
-        // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
-        let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        let run_cmd = run_command_or_open_shell(&nixpkgs, &derivations, &shell_cmd, &[]);
 
         exec(run_cmd, cache)
     } else if args.print_path {
@@ -665,7 +697,7 @@ struct Opt {
 
     /// Open a shell containing the derivations containing the executables.
     /// Every argument is an executable, e.g. `, -s cowsay lolcat`
-    #[clap(short, long)]
+    #[clap(short, long, conflicts_with_all = ["install", "print_packages", "print_path"])]
     shell: bool,
 
     /// Picker to use
@@ -804,6 +836,33 @@ mod tests {
         assert_eq!(
             flake("nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
             ["nixpkgs#cowsay.out", "nixpkgs#lolcat.out"]
+        );
+    }
+
+    #[test]
+    fn shell_commands_are_all_arguments() {
+        let commands = |args: &[&str]| {
+            let args = Opt::try_parse_from([&[","], args].concat()).unwrap();
+            shell_commands(&args)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(commands(&["-s", "cowsay", "lolcat"]), ["cowsay", "lolcat"]);
+        // --shell is a flag, so it can be combined with other short flags
+        assert_eq!(commands(&["-sd", "cowsay"]), ["cowsay"]);
+        // A command that is given twice is there once
+        assert_eq!(
+            commands(&["-s", "cowsay", "lolcat", "cowsay"]),
+            ["cowsay", "lolcat"]
+        );
+        // `man` is a command like the others, also in front of them, where
+        // it is parsed as the subcommand
+        assert_eq!(commands(&["-s", "cowsay", "man"]), ["cowsay", "man"]);
+        assert_eq!(
+            commands(&["-s", "man", "cowsay", "lolcat"]),
+            ["man", "cowsay", "lolcat"]
         );
     }
 
