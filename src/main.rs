@@ -258,9 +258,11 @@ fn run_command_or_open_shell(
 }
 
 /// Replace this process with `cmd`. Only returns if that failed. Destructors
-/// don't run when it succeeds, so the cache has to be dropped before this to
-/// get written
-fn exec(mut cmd: Command) -> ExitCode {
+/// don't run when it succeeds, so `cache` is taken and dropped first, which
+/// writes the cache file
+fn exec(mut cmd: Command, cache: Option<Cache>) -> ExitCode {
+    drop(cache);
+
     let err = cmd.exec();
     eprintln!(
         "comma: failed to execute '{}': {err}",
@@ -538,14 +540,11 @@ fn main() -> ExitCode {
 
     let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
 
-    // In the branches that end in `exec`, the cache is dropped first to make
-    // sure that the cache file is written
     if args.install {
         let mut run_cmd = Command::new("nix-env");
         run_cmd.args(["-f", "<nixpkgs>", "-iA", basename]);
 
-        drop(cache);
-        exec(run_cmd)
+        exec(run_cmd, cache)
     } else if args.shell {
         // The same package may provide several of the commands
         let mut derivations = vec![entry.derivation];
@@ -563,8 +562,7 @@ fn main() -> ExitCode {
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
         let run_cmd = run_command_or_open_shell(&nixpkgs, &derivations, &shell_cmd, &[]);
 
-        drop(cache);
-        exec(run_cmd)
+        exec(run_cmd, cache)
     } else if args.print_path {
         let Some(path) = get_command_path_from_cache(path_cache, &entry, &nixpkgs, command) else {
             return ExitCode::FAILURE;
@@ -582,8 +580,7 @@ fn main() -> ExitCode {
             &[command],
         );
 
-        drop(cache);
-        exec(run_cmd)
+        exec(run_cmd, cache)
     } else {
         // Ask before the package is built or downloaded. Choosing it in the
         // picker was already the confirmation
@@ -596,8 +593,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         };
 
-        drop(cache);
-        exec(run_cmd)
+        exec(run_cmd, cache)
     }
 }
 
