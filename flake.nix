@@ -54,6 +54,7 @@
                   --replace-fail '"nix"' '"${lib.getExe nix}"' \
                   --replace-fail '"fzy"' '"${lib.getExe fzy}"'
                 substituteInPlace ./src/install.rs \
+                  --replace-fail '"nix"' '"${lib.getExe nix}"' \
                   --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"'
               '';
 

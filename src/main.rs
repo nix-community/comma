@@ -16,6 +16,7 @@ use std::{
 use cache::{Cache, CacheEntry};
 use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{generate, Generator, Shell};
+use install::Installer;
 use log::{debug, error, trace};
 
 /// The nixpkgs that packages are built from
@@ -732,7 +733,7 @@ fn main() -> ExitCode {
 
     if args.install {
         let install_cmd =
-            install::install_command(&nixpkgs, install::package_attr(&entry.derivation));
+            Installer::detect().command(&nixpkgs, install::package_attr(&entry.derivation));
 
         exec(install_cmd, cache)
     } else if args.print_path {
@@ -804,7 +805,9 @@ struct Opt {
     #[clap(long, hide = true)]
     mangen: bool,
 
-    /// Install the derivation containing the executable
+    /// Install the derivation containing the executable into your profile,
+    /// with `nix profile` if the profile is managed by it, otherwise with
+    /// `nix-env`
     #[clap(short, long)]
     install: bool,
 

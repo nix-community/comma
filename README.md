@@ -44,6 +44,17 @@ commands can be given:
 , -s cowsay lolcat
 ```
 
+### Install
+
+Use `-i`/`--install` to install the package of a command into your profile
+instead of running it, from the same nixpkgs that commands are run from:
+
+```bash
+, -i cowsay
+```
+
+This uses `nix-env`, or `nix profile` if your profile is managed by it.
+
 ### Choosing nixpkgs
 
 By default comma uses `<nixpkgs>` from `NIX_PATH` if it is set, otherwise the
