@@ -85,6 +85,11 @@ channel is updated.
 Use `, --print-cache` to see the cached choices and paths, `--delete-entry` to
 drop the entry for a command and `--empty-cache` to clear it completely.
 
+The cache is the file `$XDG_STATE_HOME/comma/choices`
+(`~/.local/state/comma/choices`). If comma can't decode it, e.g. because it
+was written by a version of comma with another cache format, the file is moved
+to `choices.old` next to it and comma starts with an empty cache.
+
 Cache for path is the default since it makes subsequent usage of a command much
 faster:
 

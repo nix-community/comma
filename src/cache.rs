@@ -2,7 +2,8 @@ use std::{
     collections::HashMap,
     env,
     error::Error,
-    fs, io,
+    fs::{self, File},
+    io::{self, Write},
     path::{Path, PathBuf},
     process,
 };
@@ -10,7 +11,7 @@ use std::{
 use bitcode::{Decode, Encode};
 use log::{debug, error};
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Default)]
 struct CacheData(HashMap<String, CacheEntry>);
 
 #[derive(Encode, Decode, Clone, Debug)]
@@ -44,6 +45,13 @@ fn display_path(path: &Path) -> String {
         )
 }
 
+/// The file next to `path` that is named like it, followed by `suffix`
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
 pub struct Cache {
     path: PathBuf,
     data: CacheData,
@@ -62,27 +70,58 @@ impl Cache {
     fn load(path: PathBuf) -> Result<Self, Box<dyn Error>> {
         debug!("creating new cache instance for path: {}", path.display());
 
+        let data = Self::read_file(&path)
+            .map_err(|e| format!("can't read '{}': {e}", display_path(&path)))?;
+
         Ok(Self {
-            data: if path.exists() {
-                let bytes = fs::read(&path)?;
-                bitcode::decode(&bytes).unwrap_or_else(|e| {
-                    // Shown by default, since the user's package choices are lost
-                    eprintln!(
-                        "comma: discarding the cache at '{}' because it could not \
-                         be read: {e}\n\
-                         comma: the cache format may have changed between comma \
-                         versions. Remembered package choices and cached paths are \
-                         lost, so you will be asked to pick packages again.",
-                        display_path(&path)
-                    );
-                    CacheData(HashMap::new())
-                })
-            } else {
-                CacheData(HashMap::new())
-            },
+            data,
             path,
             changes: HashMap::new(),
             emptied: false,
+        })
+    }
+
+    /// The contents of the cache file at `path`. A file that doesn't exist
+    /// or is empty is an empty cache. So is one that can't be decoded, which
+    /// is moved to `choices.old`, so that the next write doesn't overwrite it
+    fn read_file(path: &Path) -> io::Result<CacheData> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e),
+        };
+
+        // Nothing in it that could be lost. Versions of comma that wrote the
+        // file in place left it empty when the disk was full
+        if bytes.is_empty() {
+            return Ok(CacheData::default());
+        }
+
+        bitcode::decode(&bytes).or_else(|decode_err| {
+            let old = sibling(path, ".old");
+            match fs::rename(path, &old) {
+                Ok(()) => {}
+                // Another comma running at the same time has moved it
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(io::Error::other(format!(
+                        "the existing file could not be decoded ({decode_err}) and \
+                         could not be moved to '{}': {e}",
+                        display_path(&old)
+                    )))
+                }
+            }
+
+            // Shown by default, since the user's package choices are lost
+            eprintln!(
+                "comma: the cache at '{}' could not be read: {decode_err}\n\
+                 comma: it was moved to '{}'. The cache format may have changed \
+                 between comma versions. Remembered package choices and cached \
+                 paths are lost, so you will be asked to pick packages again.",
+                display_path(path),
+                display_path(&old)
+            );
+            Ok(CacheData::default())
         })
     }
 
@@ -91,10 +130,11 @@ impl Cache {
     fn write(&self) -> io::Result<()> {
         // Apply the changes to what is in the file now, not to what was read
         // at startup, so that entries the other comma has written since then
-        // are kept. A file that can't be read is replaced, as `load` announced
-        let mut data = match fs::read(&self.path).map(|bytes| bitcode::decode(&bytes)) {
-            Ok(Ok(data)) if !self.emptied => data,
-            _ => CacheData(HashMap::new()),
+        // are kept
+        let mut data = if self.emptied {
+            CacheData::default()
+        } else {
+            Self::read_file(&self.path)?
         };
         for (command, entry) in &self.changes {
             match entry {
@@ -107,11 +147,15 @@ impl Cache {
         // the other comma reads either the old or the new contents, never a
         // partially written file. It is named after the process, so that two
         // commas don't write to the same temporary file
-        let mut tmp = self.path.clone().into_os_string();
-        tmp.push(format!(".{}.tmp", process::id()));
-        let tmp = PathBuf::from(tmp);
+        let tmp = sibling(&self.path, &format!(".{}.tmp", process::id()));
 
-        fs::write(&tmp, bitcode::encode(&data))
+        File::create(&tmp)
+            .and_then(|mut file| {
+                file.write_all(&bitcode::encode(&data))?;
+                // On the disk before the rename, so that a crash right after
+                // it can't leave an empty cache file
+                file.sync_all()
+            })
             .and_then(|()| fs::rename(&tmp, &self.path))
             .inspect_err(|_| {
                 let _ = fs::remove_file(&tmp);
@@ -257,20 +301,51 @@ mod tests {
     }
 
     #[test]
-    fn undecodable_file_is_replaced() {
-        let dir = test_dir("undecodable_file_is_replaced");
+    fn empty_file_is_an_empty_cache() {
+        let dir = test_dir("empty_file_is_an_empty_cache");
+        let path = dir.join("choices");
+        fs::write(&path, b"").unwrap();
+
+        // Nothing to keep a backup of
+        assert!(Cache::load(path).unwrap().entries().is_empty());
+        assert_eq!(file_names(&dir), ["choices"]);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn undecodable_file_is_kept_as_backup() {
+        let dir = test_dir("undecodable_file_is_kept_as_backup");
         let path = dir.join("choices");
         fs::write(&path, b"garbage").unwrap();
 
-        // Starts empty instead of failing
+        // Starts empty instead of failing, with the file moved out of the way
         let mut cache = Cache::load(path.clone()).unwrap();
         assert!(cache.entries().is_empty());
+        assert_eq!(file_names(&dir), ["choices.old"]);
+        assert_eq!(fs::read(dir.join("choices.old")).unwrap(), b"garbage");
         cache.update("hello", entry("hello.out"));
         drop(cache);
 
-        // The update replaced the file and left no temporary file behind
+        // The update wrote a new file and left no temporary file behind
         assert!(Cache::load(path).unwrap().query("hello").is_some());
-        assert_eq!(file_names(&dir), ["choices"]);
+        assert_eq!(file_names(&dir), ["choices", "choices.old"]);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn undecodable_file_that_cannot_be_moved_is_left_alone() {
+        let dir = test_dir("undecodable_file_that_cannot_be_moved_is_left_alone");
+        let path = dir.join("choices");
+        fs::write(&path, b"garbage").unwrap();
+        // A file can't be renamed over a directory
+        fs::create_dir(dir.join("choices.old")).unwrap();
+
+        // The cache is disabled rather than the file overwritten
+        let err = Cache::load(path.clone()).err().unwrap().to_string();
+        assert!(err.contains("could not be moved to"), "{err}");
+        assert_eq!(fs::read(&path).unwrap(), b"garbage");
 
         fs::remove_dir_all(dir).unwrap();
     }
