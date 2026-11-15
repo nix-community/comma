@@ -257,6 +257,28 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
+/// The exit statuses a shell gives for a command that wasn't found, and for
+/// one that was found but couldn't be executed
+const EXIT_NOT_FOUND: u8 = 127;
+const EXIT_NOT_EXECUTABLE: u8 = 126;
+
+/// The exit status for `program`, which couldn't be executed because of
+/// `err`. These are the ones a shell gives, so that this can be told apart
+/// from the program itself failing
+fn exec_failure_status(program: &Path, err: &io::Error) -> u8 {
+    // A program that exists is "not found" when its interpreter is missing
+    // (the one after `#!`, or the ELF loader). A shell says for that, that
+    // the program couldn't be executed. A name without a directory is
+    // searched in PATH, so it really wasn't found
+    let exists = program.is_absolute() && program.exists();
+
+    if err.kind() == io::ErrorKind::NotFound && !exists {
+        EXIT_NOT_FOUND
+    } else {
+        EXIT_NOT_EXECUTABLE
+    }
+}
+
 /// Replace this process with `cmd`. Only returns if that failed. Destructors
 /// don't run when it succeeds, so `cache` is taken and dropped first, which
 /// writes the cache file
@@ -268,7 +290,7 @@ fn exec(mut cmd: Command, cache: Option<Cache>) -> ExitCode {
         "comma: failed to execute '{}': {err}",
         cmd.get_program().to_string_lossy()
     );
-    ExitCode::FAILURE
+    ExitCode::from(exec_failure_status(Path::new(cmd.get_program()), &err))
 }
 
 fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
@@ -365,7 +387,7 @@ fn run_command_from_cache(
 /// The exit status when the user declined to run the command. It is what a
 /// shell gives for a command that wasn't found, so that after a declined
 /// command-not-found `typo && other` doesn't go on to run `other`
-const EXIT_NOT_RUN: u8 = 127;
+const EXIT_NOT_RUN: u8 = EXIT_NOT_FOUND;
 
 /// Ask whether to run `command` from the package `derivation`, with the
 /// question written to `output` and the answer read from `input`. This is
@@ -757,6 +779,20 @@ mod tests {
             confirm_with("maybe\ny\n"),
             (true, format!("{question}Please enter 'y' or 'n'.\n{question}"))
         );
+    }
+
+    #[test]
+    fn exec_failure_statuses() {
+        let not_found = io::Error::from(io::ErrorKind::NotFound);
+
+        // A name is searched in PATH, whatever is in the current directory
+        assert_eq!(exec_failure_status(Path::new("src"), &not_found), 127);
+        assert_eq!(
+            exec_failure_status(Path::new("/no/such/program"), &not_found),
+            127
+        );
+        // It exists, so what wasn't found is its interpreter
+        assert_eq!(exec_failure_status(Path::new("/"), &not_found), 126);
     }
 
     #[test]
