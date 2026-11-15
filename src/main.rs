@@ -228,6 +228,18 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
+/// Replace this process with `cmd`. Only returns if that failed. Destructors
+/// don't run when it succeeds, so the cache has to be dropped before this to
+/// get written
+fn exec(mut cmd: Command) -> ExitCode {
+    let err = cmd.exec();
+    eprintln!(
+        "comma: failed to execute '{}': {err}",
+        cmd.get_program().to_string_lossy()
+    );
+    ExitCode::FAILURE
+}
+
 fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
     let mut run_cmd = Command::new("nix");
 
@@ -505,33 +517,40 @@ fn main() -> ExitCode {
 
     let nixpkgs = Nixpkgs::from_args(args.nixpkgs_flake.as_deref());
 
+    // In the branches that end in `exec`, the cache is dropped first to make
+    // sure that the cache file is written
     if args.install {
-        let _ = Command::new("nix-env")
-            .args(["-f", "<nixpkgs>", "-iA", basename])
-            .exec();
+        let mut run_cmd = Command::new("nix-env");
+        run_cmd.args(["-f", "<nixpkgs>", "-iA", basename]);
+
+        drop(cache);
+        exec(run_cmd)
     } else if args.shell {
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        let _ = run_command_or_open_shell(&nixpkgs, &entry.derivation, &shell_cmd, &[]).exec();
+        let run_cmd = run_command_or_open_shell(&nixpkgs, &entry.derivation, &shell_cmd, &[]);
+
+        drop(cache);
+        exec(run_cmd)
     } else if args.print_path {
         let Some(path) = get_command_path_from_cache(path_cache, &entry, &nixpkgs, command) else {
             return ExitCode::FAILURE;
         };
         println!("{path}");
+
+        ExitCode::SUCCESS
     } else if args.subcmds.is_some() {
         // Open manpage via
         // nix shell nixpkgs#drvName --command man commandName
-        let err = run_command_or_open_shell(
+        let run_cmd = run_command_or_open_shell(
             &nixpkgs,
             &entry.derivation.replace(".out", "^*"),
             "man",
             &[command],
-        )
-        .exec();
+        );
 
-        // This code will only run if an error occurs launching
-        eprintln!("{err:?}");
-        return ExitCode::FAILURE;
+        drop(cache);
+        exec(run_cmd)
     } else {
         // Ask before the package is built or downloaded. Choosing it in the
         // picker was already the confirmation
@@ -539,19 +558,14 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_NOT_RUN);
         }
 
-        let Some(mut run_cmd) =
-            run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
+        let Some(run_cmd) = run_command_from_cache(path_cache, &entry, &nixpkgs, command, trail)
         else {
             return ExitCode::FAILURE;
         };
 
-        // Drop cache before calling exec() to make sure that
-        // the cache file is written
         drop(cache);
-        let _ = run_cmd.exec();
+        exec(run_cmd)
     }
-
-    ExitCode::SUCCESS
 }
 
 fn print_cache(cache: &Cache) {
