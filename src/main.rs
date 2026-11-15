@@ -158,38 +158,42 @@ fn pick(picker: &str, derivations: &[String]) -> Option<String> {
     )
 }
 
-fn index_database(command: &str) -> Option<Box<[String]>> {
-    index::check_database_updated();
-
+/// The packages in the nix-index database that have `command`, or the
+/// reason why there are none
+fn locate(command: &str) -> Result<Box<[String]>, String> {
     let nix_locate_output = Command::new("nix-locate")
         .args(["--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{command}"))
         .output()
-        .expect("failed to execute nix-locate");
+        .map_err(|err| format!("failed to execute nix-locate: {err}"))?;
 
     if !nix_locate_output.status.success() {
-        match std::str::from_utf8(&nix_locate_output.stderr) {
-            Ok(stderr) => eprintln!("nix-locate failed with: {stderr}"),
-            Err(_) => eprintln!("nix-locate failed"),
-        }
-        return None;
+        return Err(match std::str::from_utf8(&nix_locate_output.stderr) {
+            Ok(stderr) => format!("nix-locate failed with: {stderr}"),
+            Err(_) => "nix-locate failed".to_owned(),
+        });
     }
 
     let attrs = nix_locate_output.stdout;
 
     if attrs.is_empty() {
-        eprintln!("No executable `{command}` found in nix-index database.");
-        return None;
+        return Err(format!(
+            "No executable `{command}` found in nix-index database."
+        ));
     }
 
-    Some(
-        std::str::from_utf8(&attrs)
-            .expect("fail")
-            .trim()
-            .split('\n')
-            .map(std::borrow::ToOwned::to_owned)
-            .collect(),
-    )
+    Ok(std::str::from_utf8(&attrs)
+        .expect("fail")
+        .trim()
+        .split('\n')
+        .map(std::borrow::ToOwned::to_owned)
+        .collect())
+}
+
+fn index_database(command: &str) -> Option<Box<[String]>> {
+    index::check_database_updated();
+
+    locate(command).inspect_err(|err| eprintln!("{err}")).ok()
 }
 
 /// What is known about the package of a command before the user is asked
@@ -336,6 +340,53 @@ fn shell_commands(args: &Opt) -> Vec<&str> {
     commands
 }
 
+/// The package that a command is run from in a shell with `packages`, when
+/// that isn't the package `chosen` for it. The packages come first in PATH in
+/// their order, so another one of the `providers`, the packages that have the
+/// command, wins when it is before the chosen one.
+///
+/// That is the order since nix 2.20:
+/// <https://github.com/nixos/nix/commit/f4454aac9f002c33b84bb52e0bba2a46ea6170cd>.
+/// Before it, `nix shell` put every package in front of the ones before it,
+/// so the last one won. With such a nix this is wrong about which package a
+/// command is run from
+fn shadowing_package<'a>(
+    packages: &[&'a str],
+    chosen: &str,
+    providers: &[String],
+) -> Option<&'a str> {
+    packages
+        .iter()
+        .copied()
+        .take_while(|package| *package != chosen)
+        .find(|package| providers.iter().any(|provider| provider == package))
+}
+
+/// Warn about the `commands` that aren't run from the package `chosen` for
+/// them in a shell with `packages`
+fn warn_about_shadowed(commands: &[&str], found: &[Found], chosen: &[String], packages: &[&str]) {
+    for ((command, found), chosen) in commands.iter().zip(found).zip(chosen) {
+        // Nothing is before the first package
+        if packages.first() == Some(&chosen.as_str()) {
+            continue;
+        }
+
+        // The index wasn't looked at for a remembered choice. When that
+        // doesn't work now, there is nothing to warn about
+        let providers = match found {
+            Found::InIndex(attrs) => attrs.clone(),
+            Found::Remembered(_) => locate(command).unwrap_or_default(),
+        };
+
+        if let Some(package) = shadowing_package(packages, chosen, &providers) {
+            eprintln!(
+                "Warning: '{command}' in the shell is the one from '{package}', \
+                 which comes before '{chosen}' in PATH."
+            );
+        }
+    }
+}
+
 /// Open a shell that has the packages of all the commands given in `args`
 fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCode {
     let commands = shell_commands(args);
@@ -363,8 +414,7 @@ fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCo
         }
     }
 
-    // The same package may provide several of the commands
-    let mut derivations: Vec<String> = Vec::new();
+    let mut chosen: Vec<String> = Vec::new();
     for (command, found) in commands.iter().zip(&found) {
         // The picker only shows the packages. With a single command it is
         // clear what they are for
@@ -374,11 +424,18 @@ fn open_shell(args: &Opt, mut cache: Option<Cache>, nixpkgs: &Nixpkgs) -> ExitCo
         let Some((entry, _)) = choose_entry(cache.as_mut(), command, found, &args.picker) else {
             return ExitCode::FAILURE;
         };
-        if !derivations.contains(&entry.derivation) {
-            derivations.push(entry.derivation);
+        chosen.push(entry.derivation);
+    }
+
+    // The same package may provide several of the commands
+    let mut derivations: Vec<&str> = Vec::new();
+    for package in &chosen {
+        if !derivations.contains(&package.as_str()) {
+            derivations.push(package);
         }
     }
-    let derivations: Vec<&str> = derivations.iter().map(String::as_str).collect();
+
+    warn_about_shadowed(&commands, &found, &chosen, &derivations);
 
     // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
     let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
@@ -907,6 +964,23 @@ mod tests {
             commands(&["-s", "man", "cowsay", "lolcat"]),
             ["man", "cowsay", "lolcat"]
         );
+    }
+
+    #[test]
+    fn shadowing_packages() {
+        let packages = ["xz.bin", "busybox.out", "lolcat.out"];
+        let xz = ["xz.bin".to_owned(), "busybox.out".to_owned()];
+        let lolcat = ["lolcat.out".to_owned()];
+
+        // xz.bin has xz too and is before busybox.out
+        assert_eq!(
+            shadowing_package(&packages, "busybox.out", &xz),
+            Some("xz.bin")
+        );
+        // The chosen package is before the other one that has it
+        assert_eq!(shadowing_package(&packages, "xz.bin", &xz), None);
+        // No other package has it
+        assert_eq!(shadowing_package(&packages, "lolcat.out", &lolcat), None);
     }
 
     #[test]
