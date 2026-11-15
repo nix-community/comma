@@ -34,6 +34,16 @@ run it from whatever location it happens to occupy in `nixpkgs` without really t
 , cowsay neato
 ```
 
+### Shell
+
+Use `-s`/`--shell` to open a shell that has the packages of the given commands
+instead of running one. It is the shell comma was started from, and several
+commands can be given:
+
+```bash
+, -s cowsay lolcat
+```
+
 ### Choosing nixpkgs
 
 By default comma uses `<nixpkgs>` from `NIX_PATH` if it is set, otherwise the

@@ -43,12 +43,16 @@ impl Nixpkgs {
         }
     }
 
-    /// The arguments that make `nix shell` or `nix build` use `attr` from
+    /// The arguments that make `nix shell` or `nix build` use `attrs` from
     /// this nixpkgs
-    fn installable_args(&self, attr: &str) -> Vec<String> {
+    fn installable_args(&self, attrs: &[&str]) -> Vec<String> {
         match self {
-            Self::Channel { .. } => vec!["-f".to_owned(), "<nixpkgs>".to_owned(), attr.to_owned()],
-            Self::Flake(flake) => vec![format!("{flake}#{attr}")],
+            Self::Channel { .. } => ["-f", "<nixpkgs>"]
+                .iter()
+                .chain(attrs)
+                .map(|&arg| arg.to_owned())
+                .collect(),
+            Self::Flake(flake) => attrs.iter().map(|attr| format!("{flake}#{attr}")).collect(),
         }
     }
 
@@ -200,9 +204,34 @@ fn index_database_pick(command: &str, picker: &str) -> Option<(String, bool)> {
     }
 }
 
+/// The package that provides `command`, and whether the user chose it in the
+/// picker just now, rather than it being the only one or remembered in the
+/// cache. A package found in the index is remembered in `cache`
+fn find_entry(
+    cache: Option<&mut Cache>,
+    command: &str,
+    picker: &str,
+) -> Option<(CacheEntry, bool)> {
+    if let Some(entry) = cache.as_ref().and_then(|cache| cache.query(command)) {
+        return Some((entry, false));
+    }
+
+    let (derivation, chosen) = index_database_pick(command, picker)?;
+    let entry = CacheEntry {
+        derivation,
+        paths: HashMap::new(),
+    };
+    if let Some(cache) = cache {
+        cache.update(command, entry.clone());
+    }
+    Some((entry, chosen))
+}
+
+/// `nix shell` with the packages `choices`, running `command` with the
+/// arguments `trail` in it
 fn run_command_or_open_shell(
     nixpkgs: &Nixpkgs,
-    choice: &str,
+    choices: &[&str],
     command: &str,
     trail: &[&str],
 ) -> Command {
@@ -214,7 +243,7 @@ fn run_command_or_open_shell(
         "shell",
     ]);
 
-    run_cmd.args(nixpkgs.installable_args(choice));
+    run_cmd.args(nixpkgs.installable_args(choices));
 
     if !command.is_empty() {
         run_cmd.args(["--command", command]);
@@ -251,7 +280,7 @@ fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<St
         "--no-link",
     ]);
 
-    run_cmd.args(nixpkgs.installable_args(choice));
+    run_cmd.args(nixpkgs.installable_args(&[choice]));
 
     let result = run_cmd
         .stdout(Stdio::piped())
@@ -454,9 +483,16 @@ fn main() -> ExitCode {
         (&args.cmd[0], &args.cmd[1..])
     };
 
+    // With --shell every argument is a command, and the packages of all of
+    // them go in the shell
+    let extra_commands = if args.shell { trail } else { &[] };
+
     if args.delete_entry {
         if let Some(ref mut cache) = cache {
             cache.delete(command);
+            for extra_command in extra_commands {
+                cache.delete(extra_command);
+            }
         }
     }
 
@@ -478,23 +514,8 @@ fn main() -> ExitCode {
         }
     }
 
-    // `picked` is whether the user chose the package in the picker just now,
-    // rather than it being the only one or remembered in the cache
-    let cached = cache.as_ref().and_then(|cache| cache.query(command));
-    let (entry, picked) = if let Some(entry) = cached {
-        (entry, false)
-    } else {
-        let Some((derivation, picked)) = index_database_pick(command, &args.picker) else {
-            return ExitCode::FAILURE;
-        };
-        let entry = CacheEntry {
-            derivation,
-            paths: HashMap::new(),
-        };
-        if let Some(cache) = cache.as_mut() {
-            cache.update(command, entry.clone());
-        }
-        (entry, picked)
+    let Some((entry, picked)) = find_entry(cache.as_mut(), command, &args.picker) else {
+        return ExitCode::FAILURE;
     };
 
     // Whether evaluated paths for this command are read from and written to
@@ -526,9 +547,21 @@ fn main() -> ExitCode {
         drop(cache);
         exec(run_cmd)
     } else if args.shell {
+        // The same package may provide several of the commands
+        let mut derivations = vec![entry.derivation];
+        for extra_command in extra_commands {
+            let Some((entry, _)) = find_entry(cache.as_mut(), extra_command, &args.picker) else {
+                return ExitCode::FAILURE;
+            };
+            if !derivations.contains(&entry.derivation) {
+                derivations.push(entry.derivation);
+            }
+        }
+        let derivations: Vec<&str> = derivations.iter().map(String::as_str).collect();
+
         // TODO: use cache here, but this is tricky since it actually depends in `nix-shell`
         let shell_cmd = shell::select_shell_from_pid(process::id()).unwrap_or("bash".into());
-        let run_cmd = run_command_or_open_shell(&nixpkgs, &entry.derivation, &shell_cmd, &[]);
+        let run_cmd = run_command_or_open_shell(&nixpkgs, &derivations, &shell_cmd, &[]);
 
         drop(cache);
         exec(run_cmd)
@@ -544,7 +577,7 @@ fn main() -> ExitCode {
         // nix shell nixpkgs#drvName --command man commandName
         let run_cmd = run_command_or_open_shell(
             &nixpkgs,
-            &entry.derivation.replace(".out", "^*"),
+            &[&entry.derivation.replace(".out", "^*")],
             "man",
             &[command],
         );
@@ -612,7 +645,8 @@ struct Opt {
     #[clap(short, long)]
     install: bool,
 
-    /// Open a shell containing the derivation containing the executable
+    /// Open a shell containing the derivations containing the executables.
+    /// Every argument is an executable, e.g. `, -s cowsay lolcat`
     #[clap(short, long)]
     shell: bool,
 
@@ -664,7 +698,8 @@ struct Opt {
     #[clap(short, long = "delete-entry")]
     delete_entry: bool,
 
-    /// Command to run
+    /// Command to run, followed by its arguments. With `--shell`, the
+    /// commands whose packages go in the shell
     #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "print_cache"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
     cmd: Vec<String>,
 
@@ -725,6 +760,18 @@ mod tests {
         assert_eq!(
             confirm_with("maybe\ny\n"),
             (true, format!("{question}Please enter 'y' or 'n'.\n{question}"))
+        );
+    }
+
+    #[test]
+    fn nixpkgs_installable_args() {
+        assert_eq!(
+            channel("nixpkgs=/nix/nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
+            ["-f", "<nixpkgs>", "cowsay.out", "lolcat.out"]
+        );
+        assert_eq!(
+            flake("nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
+            ["nixpkgs#cowsay.out", "nixpkgs#lolcat.out"]
         );
     }
 
