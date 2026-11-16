@@ -1,6 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    process::Command,
     sync::Once,
     time::{Duration, SystemTime},
 };
@@ -72,4 +73,42 @@ fn is_database_old(database_file: &Path) -> bool {
         .unwrap_or(Duration::new(0, 0));
 
     time_since_modified > Duration::from_hours(720) && !metadata.permissions().readonly()
+}
+
+/// The packages in the nix-index database that have `command`, or the
+/// reason why there are none
+pub fn locate(command: &str) -> Result<Box<[String]>, String> {
+    let nix_locate_output = Command::new("nix-locate")
+        .args(["--minimal", "--at-root", "--whole-name"])
+        .arg(format!("/bin/{command}"))
+        .output()
+        .map_err(|err| format!("failed to execute nix-locate: {err}"))?;
+
+    if !nix_locate_output.status.success() {
+        return Err(match std::str::from_utf8(&nix_locate_output.stderr) {
+            Ok(stderr) => format!("nix-locate failed with: {stderr}"),
+            Err(_) => "nix-locate failed".to_owned(),
+        });
+    }
+
+    let attrs = nix_locate_output.stdout;
+
+    if attrs.is_empty() {
+        return Err(format!(
+            "No executable `{command}` found in nix-index database."
+        ));
+    }
+
+    Ok(std::str::from_utf8(&attrs)
+        .expect("fail")
+        .trim()
+        .split('\n')
+        .map(std::borrow::ToOwned::to_owned)
+        .collect())
+}
+
+pub fn index_database(command: &str) -> Option<Box<[String]>> {
+    check_database_updated();
+
+    locate(command).inspect_err(|err| eprintln!("{err}")).ok()
 }
