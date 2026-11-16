@@ -732,8 +732,7 @@ fn main() -> ExitCode {
     let path_cache = cache.as_mut().filter(|_| cache_paths);
 
     if args.install {
-        let install_cmd =
-            Installer::detect().command(&nixpkgs, install::package_attr(&entry.derivation));
+        let install_cmd = Installer::detect().command(&nixpkgs, &entry.derivation);
 
         exec(install_cmd, cache)
     } else if args.print_path {
