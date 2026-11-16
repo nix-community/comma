@@ -55,6 +55,12 @@ instead of running it, from the same nixpkgs that commands are run from:
 
 This uses `nix-env`, or `nix profile` if your profile is managed by it.
 
+Consider switching from `nix-env` to `nix profile`. It records the flake that
+a package is from, so `nix profile upgrade` upgrades it from there. Installing
+anything with `nix profile install` turns your profile into one of
+`nix profile`; `nix-env` can't be used on it after that, and comma uses
+`nix profile` for it from then on.
+
 ### Choosing nixpkgs
 
 By default comma uses `<nixpkgs>` from `NIX_PATH` if it is set, otherwise the
