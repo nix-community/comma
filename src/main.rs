@@ -58,6 +58,24 @@ impl Nixpkgs {
         }
     }
 
+    /// The arguments that make `nix profile` install `installable` from this
+    /// nixpkgs. Only for a flake it records where the package is from, which
+    /// `nix profile upgrade` needs. So it is given as one whenever it is one:
+    /// also `<nixpkgs>`, when its entry in `NIX_PATH` is `flake:...`
+    fn profile_installable_args(&self, installable: &str) -> Vec<String> {
+        let flake = match self {
+            Self::Channel { nix_path } => nixpkgs_entry(nix_path)
+                .and_then(|value| value.strip_prefix("flake:"))
+                .filter(|flake| !flake.is_empty()),
+            Self::Flake(flake) => Some(flake.as_str()),
+        };
+
+        match flake {
+            Some(flake) => vec![format!("{flake}#{installable}")],
+            None => self.installable_args(&[installable]),
+        }
+    }
+
     /// The arguments that make `nix-env` use this nixpkgs. It doesn't take a
     /// flake, but `-f flake:...` is the source of one, which for nixpkgs is
     /// the same as `<nixpkgs>` of a channel
@@ -954,6 +972,20 @@ mod tests {
         assert_eq!(
             flake("nixpkgs").installable_args(&["cowsay.out", "lolcat.out"]),
             ["nixpkgs#cowsay.out", "nixpkgs#lolcat.out"]
+        );
+    }
+
+    #[test]
+    fn nixpkgs_profile_installable_args() {
+        // `<nixpkgs>` that is a flake is installed from as one
+        assert_eq!(
+            channel("nixos-config=/etc/nixos:nixpkgs=flake:nixpkgs")
+                .profile_installable_args("cowsay"),
+            ["nixpkgs#cowsay"]
+        );
+        assert_eq!(
+            channel("nixpkgs=/nix/nixpkgs").profile_installable_args("cowsay"),
+            ["-f", "<nixpkgs>", "cowsay"]
         );
     }
 

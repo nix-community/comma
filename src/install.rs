@@ -142,7 +142,7 @@ impl Installer {
                 if let Some(profile) = profile {
                     install_cmd.arg("--profile").arg(profile);
                 }
-                install_cmd.args(nixpkgs.installable_args(&[&installable]));
+                install_cmd.args(nixpkgs.profile_installable_args(&installable));
 
                 install_cmd
             }
