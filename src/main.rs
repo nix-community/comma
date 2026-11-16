@@ -319,6 +319,16 @@ fn run_command_or_open_shell(
     run_cmd
 }
 
+/// The installable for all outputs of the package of `derivation`, which
+/// nix-locate gives with the output that has the command appended, like
+/// `micro.out` or `bind.dnsutils`. The man page can be in another output
+fn all_outputs(derivation: &str) -> String {
+    let attr = derivation
+        .rsplit_once('.')
+        .map_or(derivation, |(attr, _output)| attr);
+    format!("{attr}^*")
+}
+
 /// The exit statuses a shell gives for a command that wasn't found, and for
 /// one that was found but couldn't be executed
 const EXIT_NOT_FOUND: u8 = 127;
@@ -765,7 +775,7 @@ fn main() -> ExitCode {
         // nix shell nixpkgs#drvName --command man commandName
         let run_cmd = run_command_or_open_shell(
             &nixpkgs,
-            &[&entry.derivation.replace(".out", "^*")],
+            &[&all_outputs(&entry.derivation)],
             "man",
             &[command],
         );
@@ -961,6 +971,18 @@ mod tests {
         );
         // It exists, so what wasn't found is its interpreter
         assert_eq!(exec_failure_status(Path::new("/"), &not_found), 126);
+    }
+
+    #[test]
+    fn all_outputs_of_package() {
+        assert_eq!(all_outputs("micro.out"), "micro^*");
+        // The command can be in an output other than `out`
+        assert_eq!(all_outputs("bind.dnsutils"), "bind^*");
+        // Only the output is replaced, not `.out` inside the attribute path
+        assert_eq!(
+            all_outputs("python3Packages.outcome.out"),
+            "python3Packages.outcome^*"
+        );
     }
 
     #[test]
