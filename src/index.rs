@@ -9,7 +9,12 @@ use std::{
 pub fn check_database_exists() -> Result<(), ()> {
     let database_file = get_database_file();
     if !database_file.exists() {
-        eprintln!("Warning: Nix-index database does not exist, either obtain a prebuilt database from https://github.com/nix-community/nix-index-database or try updating with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.");
+        eprintln!(
+            "Warning: Nix-index database not found at {}.\n\
+             If you use the nix-index-database module, set `programs.nix-index-database.comma.enable = true` instead of installing comma yourself.\n\
+             Otherwise set NIX_INDEX_DATABASE to where the database is, obtain a prebuilt database from https://github.com/nix-community/nix-index-database or generate one with `nix run 'nixpkgs#nix-index' --extra-experimental-features 'nix-command flakes'`.",
+            database_file.display()
+        );
         return Err(());
     }
     Ok(())

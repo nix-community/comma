@@ -118,6 +118,26 @@ an issue for you, set `COMMA_CACHING=1`.
 
 https://github.com/nix-community/nix-index-database
 
+Comma looks for the database in `$NIX_INDEX_DATABASE` if it is set, otherwise
+in `$XDG_CACHE_HOME/nix-index/files` (`~/.cache/nix-index/files`).
+
+The NixOS, nix-darwin and home-manager modules of nix-index-database don't put
+the database in either place. They wrap `nix-locate` so that only it knows
+where the database is, and the `comma` package doesn't run the `nix-locate`
+from `PATH`. So a `comma` that you install yourself next to the module fails
+with `Nix-index database not found`, even though `nix-locate` and
+`command-not-found` work.
+
+Let the module install a comma that knows the database instead, and remove
+`comma` from your own packages:
+
+```nix
+programs.nix-index-database.comma.enable = true;
+```
+
+With the home-manager module, `programs.nix-index.symlinkToCacheHome = true;`
+also works, since it links the database to `~/.cache/nix-index/files`.
+
 ## Running with Sudo
 
 If your nix-index isn't at the default location then you will need to pass the NIX_INDEX_DATABASE variable.
