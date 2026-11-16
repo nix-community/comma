@@ -1,6 +1,8 @@
 use clap::{crate_version, Args, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 
+use crate::tools;
+
 /// Runs programs without installing them
 #[derive(Parser)]
 #[clap(version = crate_version!())]
@@ -22,7 +24,7 @@ pub struct Opt {
     pub shell: bool,
 
     /// Picker to use
-    #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
+    #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = tools::FZY)]
     pub picker: String,
 
     /// Nixpkgs flake to use, e.g. `github:nixos/nixpkgs/nixos-unstable` [default: nixpkgs].

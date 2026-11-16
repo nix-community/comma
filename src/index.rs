@@ -6,6 +6,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use crate::tools::NIX_LOCATE;
+
 /// Prints a warning if the nix-index database is non-existent
 pub fn check_database_exists() -> Result<(), ()> {
     let database_file = get_database_file();
@@ -78,7 +80,7 @@ fn is_database_old(database_file: &Path) -> bool {
 /// The packages in the nix-index database that have `command`, or the
 /// reason why there are none
 pub fn locate(command: &str) -> Result<Box<[String]>, String> {
-    let nix_locate_output = Command::new("nix-locate")
+    let nix_locate_output = Command::new(NIX_LOCATE)
         .args(["--minimal", "--at-root", "--whole-name"])
         .arg(format!("/bin/{command}"))
         .output()

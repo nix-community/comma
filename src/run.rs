@@ -10,6 +10,7 @@ use log::{debug, error, trace};
 use crate::{
     cache::{Cache, CacheEntry},
     nixpkgs::Nixpkgs,
+    tools::NIX,
 };
 
 /// `nix shell` with the packages `choices`, running `command` with the
@@ -20,7 +21,7 @@ pub fn run_command_or_open_shell(
     command: &str,
     trail: &[&str],
 ) -> Command {
-    let mut run_cmd = Command::new("nix");
+    let mut run_cmd = Command::new(NIX);
 
     run_cmd.args([
         "--extra-experimental-features",
@@ -89,7 +90,7 @@ pub fn exec(mut cmd: Command, cache: Option<Cache>) -> ExitCode {
 }
 
 fn get_command_path(nixpkgs: &Nixpkgs, choice: &str, command: &str) -> Option<String> {
-    let mut run_cmd = Command::new("nix");
+    let mut run_cmd = Command::new(NIX);
 
     run_cmd.args([
         "--extra-experimental-features",

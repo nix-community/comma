@@ -2,7 +2,10 @@ use std::{env, path::PathBuf, process::Command};
 
 use log::{debug, trace};
 
-use crate::nixpkgs::Nixpkgs;
+use crate::{
+    nixpkgs::Nixpkgs,
+    tools::{NIX, NIX_ENV},
+};
 
 /// The attribute of the package that `derivation` is from, and its output
 /// that has the command, when that one has to be asked for. `derivation` is
@@ -83,7 +86,7 @@ impl Installer {
     pub fn detect() -> Self {
         // Listing what is installed is the least that makes nix-env look at
         // the profile
-        let refused = match Command::new("nix-env").arg("--query").output() {
+        let refused = match Command::new(NIX_ENV).arg("--query").output() {
             Ok(output) => !output.status.success() && refused_by_nix_env(&output.stderr),
             Err(err) => {
                 debug!("failed to execute nix-env: {err}");
@@ -110,7 +113,7 @@ impl Installer {
 
         let install_cmd = match self {
             Self::NixEnv => {
-                let mut install_cmd = Command::new("nix-env");
+                let mut install_cmd = Command::new(NIX_ENV);
 
                 install_cmd.args(nixpkgs.nix_env_args());
                 match output {
@@ -121,7 +124,7 @@ impl Installer {
                 install_cmd
             }
             Self::NixProfile { profile } => {
-                let mut install_cmd = Command::new("nix");
+                let mut install_cmd = Command::new(NIX);
 
                 // `install` is called `add` since nix 2.30, which warns that
                 // the old name is deprecated. Older versions only know
@@ -192,12 +195,12 @@ mod tests {
 
         assert_eq!(
             command_line(&nix_env.command(&nixpkgs, "cowsay.out")),
-            ["nix-env", "-f", "<nixpkgs>", "-iA", "cowsay"]
+            [NIX_ENV, "-f", "<nixpkgs>", "-iA", "cowsay"]
         );
         assert_eq!(
             command_line(&nix_env.command(&nixpkgs, "python3Packages.libxml2.dev")),
             [
-                "nix-env",
+                NIX_ENV,
                 "-f",
                 "<nixpkgs>",
                 "-i",
@@ -211,7 +214,7 @@ mod tests {
         assert_eq!(
             command_line(&nix_env.command(&unstable, "cowsay.out")),
             [
-                "nix-env",
+                NIX_ENV,
                 "--extra-experimental-features",
                 "flakes",
                 "-f",
@@ -223,7 +226,7 @@ mod tests {
         assert_eq!(
             command_line(&nix_profile.command(&unstable, "cowsay.out")),
             [
-                "nix",
+                NIX,
                 "--extra-experimental-features",
                 "nix-command flakes",
                 "profile",

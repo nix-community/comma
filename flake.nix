@@ -49,15 +49,19 @@
             ];
             overrideMain = _: {
               postPatch = ''
-                substituteInPlace ./src/index.rs \
-                  --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"'
-                substituteInPlace ./src/run.rs \
-                  --replace-fail '"nix"' '"${lib.getExe nix}"'
-                substituteInPlace ./src/cli.rs \
-                  --replace-fail '"fzy"' '"${lib.getExe fzy}"'
-                substituteInPlace ./src/install.rs \
+                substituteInPlace ./src/tools.rs \
                   --replace-fail '"nix"' '"${lib.getExe nix}"' \
-                  --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"'
+                  --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"' \
+                  --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"' \
+                  --replace-fail '"fzy"' '"${lib.getExe fzy}"'
+
+                # A program that is named outside of tools.rs would be run
+                # from PATH
+                if grep -rnE '"(nix|nix-env|nix-locate|fzy)"' src; then
+                  echo "error: the programs above wouldn't be replaced with their store paths." \
+                    "Use the constants in src/tools.rs instead, e.g. tools::NIX for \"nix\"" >&2
+                  exit 1
+                fi
               '';
 
               postInstall =

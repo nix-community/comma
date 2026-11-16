@@ -7,6 +7,7 @@ mod lookup;
 mod nixpkgs;
 mod run;
 mod shell;
+mod tools;
 
 use std::{env, io, path::Path, process::ExitCode};
 
