@@ -19,6 +19,7 @@ use cache::{Cache, CacheEntry};
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Generator};
 use cli::{ManArgs, Opt, SubCmds};
+use index::{index_database, locate};
 use install::Installer;
 use log::{debug, error, trace};
 use nixpkgs::Nixpkgs;
@@ -47,44 +48,6 @@ fn pick(picker: &str, derivations: &[String]) -> Option<String> {
             .trim()
             .to_owned(),
     )
-}
-
-/// The packages in the nix-index database that have `command`, or the
-/// reason why there are none
-fn locate(command: &str) -> Result<Box<[String]>, String> {
-    let nix_locate_output = Command::new("nix-locate")
-        .args(["--minimal", "--at-root", "--whole-name"])
-        .arg(format!("/bin/{command}"))
-        .output()
-        .map_err(|err| format!("failed to execute nix-locate: {err}"))?;
-
-    if !nix_locate_output.status.success() {
-        return Err(match std::str::from_utf8(&nix_locate_output.stderr) {
-            Ok(stderr) => format!("nix-locate failed with: {stderr}"),
-            Err(_) => "nix-locate failed".to_owned(),
-        });
-    }
-
-    let attrs = nix_locate_output.stdout;
-
-    if attrs.is_empty() {
-        return Err(format!(
-            "No executable `{command}` found in nix-index database."
-        ));
-    }
-
-    Ok(std::str::from_utf8(&attrs)
-        .expect("fail")
-        .trim()
-        .split('\n')
-        .map(std::borrow::ToOwned::to_owned)
-        .collect())
-}
-
-fn index_database(command: &str) -> Option<Box<[String]>> {
-    index::check_database_updated();
-
-    locate(command).inspect_err(|err| eprintln!("{err}")).ok()
 }
 
 /// What is known about the package of a command before the user is asked

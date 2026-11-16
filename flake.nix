@@ -49,8 +49,9 @@
             ];
             overrideMain = _: {
               postPatch = ''
+                substituteInPlace ./src/index.rs \
+                  --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"'
                 substituteInPlace ./src/main.rs \
-                  --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"' \
                   --replace-fail '"nix"' '"${lib.getExe nix}"'
                 substituteInPlace ./src/cli.rs \
                   --replace-fail '"fzy"' '"${lib.getExe fzy}"'
