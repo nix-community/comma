@@ -52,8 +52,10 @@
                 substituteInPlace ./src/main.rs \
                   --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"' \
                   --replace-fail '"nix"' '"${lib.getExe nix}"' \
-                  --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"' \
                   --replace-fail '"fzy"' '"${lib.getExe fzy}"'
+                substituteInPlace ./src/install.rs \
+                  --replace-fail '"nix"' '"${lib.getExe nix}"' \
+                  --replace-fail '"nix-env"' '"${lib.getExe' nix "nix-env"}"'
               '';
 
               postInstall =
