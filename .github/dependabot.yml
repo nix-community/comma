@@ -7,4 +7,4 @@ updates:
   - package-ecosystem: "nix"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
