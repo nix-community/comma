@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, process::Command};
 
 use log::{debug, trace};
 
-use crate::Nixpkgs;
+use crate::nixpkgs::Nixpkgs;
 
 /// The attribute of the package that `derivation` is from, and its output
 /// that has the command, when that one has to be asked for. `derivation` is
