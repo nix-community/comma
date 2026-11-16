@@ -1,4 +1,5 @@
 mod cache;
+mod cli;
 mod index;
 mod install;
 mod nixpkgs;
@@ -15,8 +16,9 @@ use std::{
 };
 
 use cache::{Cache, CacheEntry};
-use clap::{crate_version, Args, CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{generate, Generator, Shell};
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Generator};
+use cli::{ManArgs, Opt, SubCmds};
 use install::Installer;
 use log::{debug, error, trace};
 use nixpkgs::Nixpkgs;
@@ -494,7 +496,6 @@ fn main() -> ExitCode {
     let args = Opt::parse();
 
     if args.mangen {
-        use clap::CommandFactory;
         let man = clap_mangen::Man::new(Opt::command());
 
         if let Err(err) = man.render(&mut std::io::stdout()) {
@@ -675,99 +676,6 @@ fn print_cache(cache: &Cache) {
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command, bin_name: &str) {
     generate(generator, cmd, bin_name, &mut io::stdout());
-}
-
-/// Runs programs without installing them
-#[derive(Parser)]
-#[clap(version = crate_version!())]
-#[command(subcommand_negates_reqs = true)]
-struct Opt {
-    /// Generate the man page, then exit
-    #[clap(long, hide = true)]
-    mangen: bool,
-
-    /// Install the derivation containing the executable into your profile,
-    /// with `nix profile` if the profile is managed by it, otherwise with
-    /// `nix-env`
-    #[clap(short, long)]
-    install: bool,
-
-    /// Open a shell containing the derivations containing the executables.
-    /// Every argument is an executable, e.g. `, -s cowsay lolcat`
-    #[clap(short, long, conflicts_with_all = ["install", "print_packages", "print_path"])]
-    shell: bool,
-
-    /// Picker to use
-    #[clap(short = 'P', long, env = "COMMA_PICKER", default_value = "fzy")]
-    picker: String,
-
-    /// Nixpkgs flake to use, e.g. `github:nixos/nixpkgs/nixos-unstable` [default: nixpkgs].
-    /// When given, it takes precedence over `<nixpkgs>` from `NIX_PATH`
-    #[clap(short = 'F', long, env = "COMMA_NIXPKGS_FLAKE")]
-    nixpkgs_flake: Option<String>,
-
-    /// Ask to confirm the program that will be run, before its package is
-    /// downloaded. Not asked right after choosing the package in the picker.
-    /// The question is asked on the terminal; without one the program isn't
-    /// run. When it isn't run, comma exits with status 127
-    #[clap(short, long, env = "COMMA_ASK_TO_CONFIRM")]
-    ask: bool,
-
-    /// Print completions for the given shell and exit
-    #[clap(short = 'c', long = "print-completions")]
-    print_completions: Option<Shell>,
-
-    /// Print the package containing the executable
-    #[clap(short = 'p', long = "print-packages")]
-    print_packages: bool,
-
-    /// Print the absolute path to the executable in the nix store
-    #[clap(short = 'x', long = "print-path")]
-    print_path: bool,
-
-    /// Configure the cache level. 0 disables the cache, 1 enables cache for
-    /// choices, 2 also caches path evaluations. Commands listed in the
-    /// `COMMA_NO_CACHE_PATH` environment variable (comma separated) are treated
-    /// as level 1
-    #[clap(long = "cache-level", env = "COMMA_CACHING", default_value_t = 2)]
-    cache_level: u8,
-
-    /// Empty the cache
-    #[clap(short, long = "empty-cache")]
-    empty_cache: bool,
-
-    /// Print the cached package choices and paths, then exit
-    #[clap(long = "print-cache")]
-    print_cache: bool,
-
-    /// Overwrite the cache entry for the specified command. This is achieved
-    /// by first deleting it from the cache, then running comma as normal
-    #[clap(short, long = "delete-entry")]
-    delete_entry: bool,
-
-    /// Command to run, followed by its arguments. With `--shell`, the
-    /// commands whose packages go in the shell
-    #[clap(required_unless_present_any = ["empty_cache", "mangen", "print_completions", "print_cache"], name = "cmd", value_hint = ValueHint::Other, trailing_var_arg = true)]
-    cmd: Vec<String>,
-
-    #[clap(subcommand)]
-    subcmds: Option<SubCmds>,
-}
-
-#[derive(Subcommand)]
-#[clap(disable_help_subcommand = true)]
-enum SubCmds {
-    /// Show the manpage if it exists instead of running the executable
-    ///
-    /// Currently only supports Section 1 pages for programs.
-    Man(ManArgs),
-}
-
-#[derive(Args)]
-struct ManArgs {
-    /// Command to show manpage for
-    #[clap(required = true, name = "cmd", trailing_var_arg = true)]
-    cmd: Vec<String>,
 }
 
 #[cfg(test)]

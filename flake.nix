@@ -51,7 +51,8 @@
               postPatch = ''
                 substituteInPlace ./src/main.rs \
                   --replace-fail '"nix-locate"' '"${lib.getExe' nix-index-unwrapped "nix-locate"}"' \
-                  --replace-fail '"nix"' '"${lib.getExe nix}"' \
+                  --replace-fail '"nix"' '"${lib.getExe nix}"'
+                substituteInPlace ./src/cli.rs \
                   --replace-fail '"fzy"' '"${lib.getExe fzy}"'
                 substituteInPlace ./src/install.rs \
                   --replace-fail '"nix"' '"${lib.getExe nix}"' \
